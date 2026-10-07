@@ -1,0 +1,7 @@
+[Unit]
+Description=Shared budget for all Claude Remote Control repositories
+
+[Slice]
+MemoryHigh=4G
+MemoryMax=5G
+CPUQuota=300%

@@ -1,0 +1,32 @@
+[Unit]
+Description=Codex Remote Control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# No Restart=: ExecStart launches the Codex Remote daemon and exits, so
+# systemd never tracks the daemon as this unit's main process and Restart=
+# could not revive it. It would only add restart attempts that count against
+# the start-rate limiter. Recovery is explicit instead: codvps head
+# enable/ensure codex clear the failed state and restart the unit, and the
+# codex-remote-watchdog timer runs head ensure codex every minute.
+#
+# The daemon is the ordinary Codex app-server daemon for ~/.codex, shared
+# with the operator's interactive codex CLI, so this unit adds no sandbox of
+# its own: no private /tmp, no hidden home, no bind mounts. (A private /tmp
+# made the daemon's control socket a symlink the host CLI could not follow.)
+# Codex's own per-command sandbox (sandbox_mode in config.toml) still applies.
+#
+# There is deliberately no ExecStartPre stop: codex-remote-start enables
+# remote control on a daemon the CLI may already have started, and stopping
+# it first would end the operator's interactive sessions.
+Type=oneshot
+RemainAfterExit=yes
+User=%i
+WorkingDirectory=/home/%i
+ExecStart=/usr/local/bin/codvps internal shell-exec --provider codex -- /usr/local/bin/codvps internal codex-remote-start
+ExecStop=/home/%i/.codex/packages/standalone/current/codex remote-control stop --json
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target

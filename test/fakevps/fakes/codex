@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fake codex binary for the fakevps container. It models the parts of the
+# Codex CLI that codvps and codex-remote@.service drive:
+#   - `login --device-auth` stores a fake auth.json in CODEX_HOME;
+#   - `remote-control start|stop|pair --json` manage one fake Remote
+#     Control daemon: a python3 process whose argv carries
+#     `app-server --remote-control` and which listens on the real control
+#     socket path, so codvps's control-socket probe (which reads /proc/net/unix and
+#     never connects) sees what it would see for the real daemon;
+#   - `app-server daemon version` answers only while that daemon is live.
+# Every call is appended to $CODEX_HOME/cache/fake-codex/invocations.log.
+# Scenarios inject the transient errored-relay failure by creating
+# fail-next-start-errored (one start) or fail-start-errored-always in that
+# cache directory; production code never creates them.
+
+if [[ ! -e /.dockerenv ]]; then
+  printf 'fake-codex is only for use in Docker container\n' >&2
+  exit 1
+fi
+
+codex_home="${CODEX_HOME:-${HOME-}/.codex}"
+state="$codex_home/cache/fake-codex"
+pid_file="$state/remote-control.pid"
+socket="$codex_home/app-server-control/app-server-control.sock"
+
+record() {
+  install -d -m 0700 "$state"
+  printf '%s\n' "$*" >>"$state/invocations.log"
+}
+
+# Prints the live daemon's pid, or fails.
+daemon_pid() {
+  local pid
+  [[ -r $pid_file ]] || return 1
+  read -r pid <"$pid_file" || return 1
+  [[ $pid =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null && [[ -S $socket ]] || return 1
+  printf '%s\n' "$pid"
+}
+
+start_daemon() {
+  local pid
+  install -d -m 0700 "$state" "$(dirname -- "$socket")"
+  rm -f -- "$pid_file" "$socket"
+  printf '%s\n' "$PWD" >"$state/daemon-cwd"
+  if sudo -n true >/dev/null 2>&1; then
+    printf 'allowed\n' >"$state/service-sudo"
+  else
+    printf 'blocked\n' >"$state/service-sudo"
+  fi
+  nohup python3 -c '
+import os, signal, socket, sys
+path = sys.argv[3]
+server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+server.bind(path)
+server.listen()
+def stop(_signum, _frame):
+    server.close()
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+while True:
+    signal.pause()
+' app-server --remote-control "$socket" >/dev/null 2>&1 &
+  pid=$!
+  printf '%s\n' "$pid" >"$pid_file"
+  printf '%s\n' "$pid" >>"$state/daemon-spawns.log"
+  for _ in {1..50}; do
+    [[ -S $socket ]] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.02
+  done
+  if [[ ! -S $socket ]]; then
+    printf 'fake Codex daemon failed to bind its control socket\n' >&2
+    exit 1
+  fi
+  printf '{"status":"running","pid":%s}\n' "$pid"
+}
+
+stop_daemon() {
+  local pid
+  if pid=$(daemon_pid); then
+    kill "$pid"
+    for _ in {1..20}; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.05
+    done
+  fi
+  rm -f -- "$pid_file" "$socket"
+  printf '{"status":"stopped"}\n'
+}
+
+case "${1:-}" in
+  --version)
+    echo "codex version 0.0.0-fake"
+    ;;
+  login)
+    if [[ $# -ne 2 || $2 != --device-auth ]]; then
+      printf 'fake-codex supports only login --device-auth\n' >&2
+      exit 2
+    fi
+    record "$*"
+    install -d -m 0700 "$codex_home"
+    printf '{"fake":true}\n' >"$codex_home/auth.json"
+    chmod 0600 "$codex_home/auth.json"
+    printf 'fake Codex login complete\n'
+    ;;
+  app-server)
+    if [[ $# -ne 3 || $2 != daemon || $3 != version ]]; then
+      printf 'unsupported fake-codex app-server command: %s\n' "$*" >&2
+      exit 2
+    fi
+    record "$*"
+    if daemon_pid >/dev/null; then
+      printf '{"status":"running","cliVersion":"0.0.0-fake"}\n'
+    else
+      printf 'fake Codex daemon is not running\n' >&2
+      exit 1
+    fi
+    ;;
+  remote-control)
+    if [[ $# -ne 3 || $3 != --json ]]; then
+      printf 'fake-codex requires remote-control <verb> --json\n' >&2
+      exit 2
+    fi
+    record "$*"
+    case "$2" in
+      start)
+        if [[ -f $state/fail-next-start-errored || -f $state/fail-start-errored-always ]]; then
+          rm -f -- "$state/fail-next-start-errored"
+          printf 'Error: Remote control is enabled on %s but the connection is errored.\n' "$(hostname)" >&2
+          exit 1
+        fi
+        if pid=$(daemon_pid); then
+          printf '{"status":"running","pid":%s}\n' "$pid"
+          exit 0
+        fi
+        start_daemon
+        ;;
+      stop)
+        stop_daemon
+        ;;
+      pair)
+        if pid=$(daemon_pid); then
+          printf '{"status":"paired","code":"FAKE-PAIR","pid":%s}\n' "$pid"
+        else
+          printf '{"status":"not_running"}\n' >&2
+          exit 1
+        fi
+        ;;
+      *)
+        printf 'unknown fake-codex remote-control command: %s\n' "$2" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  *)
+    printf 'unsupported fake-codex command: %s\n' "$*" >&2
+    exit 2
+    ;;
+esac

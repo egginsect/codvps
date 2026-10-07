@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  vet-and-test:
+    name: Vet and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run go vet
+        run: go vet ./...
+      - name: Run tests
+        run: go test ./...
+      - name: Run bootstrap installer tests
+        run: test/install/bootstrap_test.sh
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        with:
+          version: v2.14.0
+
+  cross-compile:
+    name: Cross-compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build linux/amd64
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags "-X github.com/egginsect/codvps/internal/buildinfo.Version=${{ github.sha }} \
+              -X github.com/egginsect/codvps/internal/buildinfo.Commit=${{ github.sha }} \
+              -X github.com/egginsect/codvps/internal/buildinfo.BuildDate=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            -o codvps-linux-amd64 ./cmd/codvps
+      - name: Build linux/arm64
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath \
+            -ldflags "-X github.com/egginsect/codvps/internal/buildinfo.Version=${{ github.sha }} \
+              -X github.com/egginsect/codvps/internal/buildinfo.Commit=${{ github.sha }} \
+              -X github.com/egginsect/codvps/internal/buildinfo.BuildDate=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            -o codvps-linux-arm64 ./cmd/codvps
+      - name: Check static linking
+        run: |
+          for bin in codvps-linux-amd64 codvps-linux-arm64; do
+            info=$(file "$bin")
+            echo "$info"
+            case "$info" in
+              *"statically linked"*) ;;
+              *) echo "::error::$bin is not statically linked"; exit 1 ;;
+            esac
+          done
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run shellcheck
+        run: |
+          if find . -type f \( -name "*.sh" -o -path "*/.githooks/*" \) 2>/dev/null | grep -q .; then \
+            shellcheck $(find . -type f \( -name "*.sh" -o -path "*/.githooks/*" \) 2>/dev/null); \
+          else \
+            echo "No shell files found"; \
+          fi
+
+  dco:
+    name: DCO
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Check Signed-off-by on every PR commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          status=0
+          for commit in $(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA"); do
+            author=$(git show -s --format='%an <%ae>' "$commit")
+            if ! git show -s --format=%B "$commit" | grep -Fqx "Signed-off-by: $author"; then
+              echo "::error::$commit lacks 'Signed-off-by: $author'"
+              status=1
+            fi
+          done
+          exit "$status"

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fake npm binary for testing in the fakevps container.
+# Passes through all invocations since we're testing codvps CLI behavior,
+# not npm functionality.
+
+if [[ ! -e /.dockerenv ]]; then
+  printf 'fake-npm is only for use in Docker container\n' >&2
+  exit 1
+fi
+
+# If this somehow became the real npm, fail loudly to prevent recursion
+real_npm=/usr/bin/npm
+if [[ $0 == */* && "$(readlink -f -- "$0")" == "$real_npm" ]]; then
+  printf 'fake-npm must not be installed as %s\n' "$real_npm" >&2
+  exit 1
+fi
+
+# For now, just return success for any npm invocation
+exit 0

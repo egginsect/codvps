@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fake curl for install scripts in fakevps container.
+# Stubs curl for testing installer scenarios.
+
+if [[ ! -e /.dockerenv ]]; then
+  printf 'fake-installer-curl is only for use in Docker container\n' >&2
+  exit 1
+fi
+
+# Just return success for any curl invocation
+exit 0

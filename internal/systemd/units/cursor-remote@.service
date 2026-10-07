@@ -1,0 +1,16 @@
+[Unit]
+Description=Cursor Remote Control for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/%i
+ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor -- %h/.local/bin/agent worker --name %H-%i --worker-dir %h/%i --data-dir %h/.local/share/cursor-agent/codvps-workers/%i start
+Restart=always
+RestartSec=5
+Environment="NO_OPEN_BROWSER=1"
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,15 @@
+# Reference scenarios from docs/test-parity.md that are deliberately not
+# ported. Format: scenario_name:not_ported, each preceded by a
+# "# Not ported:" line giving the reason. Every other reference scenario is
+# ported to a fake-VPS scenario script or a Go unit test; docs/test-parity*.md
+# name the script function or Go test for each one.
+
+# tests/smoke.sh
+# Not ported: codvps is one static binary with no python3 dependency, so neither install nor doctor requires it.
+test_python3_present:not_ported
+# Not ported: `heritage sync` is not a codvps command (owner rule in docs/test-parity.md), so there is no sync-after-login flow to run.
+test_heritage_sync_after_login:not_ported
+# Not ported: `heritage sync` is not a codvps command (owner rule in docs/test-parity.md), so there is no URL requirement to assert.
+test_zero_heritage_path_heritage_sync_requires_url:not_ported
+# Not ported: `codvps repo add` takes no flags by design; there is no Codex membership (codvps no longer sandboxes Codex Remote), so there is no --no-codex-member mode.
+test_repo_add_has_one_noninteractive_membership_mode:not_ported

@@ -1,0 +1,8 @@
+[Unit]
+Description=Codex Remote daemon availability watchdog
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/codvps head ensure codex
+StandardOutput=journal
+StandardError=journal

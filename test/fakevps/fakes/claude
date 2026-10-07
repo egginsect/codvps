@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fake claude binary for the fakevps container. It models the parts of the
+# real Claude CLI that codvps drives:
+#   - `auth login` stores a fake OAuth credential;
+#   - `remote-control ...` (what claude-remote@.service runs) refuses to
+#     start unless ~/.claude.json trusts the working directory, exactly like
+#     the real CLI's workspace-trust gate, and otherwise stays up;
+#   - anything else is treated as an interactive session and logged, so a
+#     scenario can prove codvps never opened one.
+# Every invocation's argv and the provider credential variables it saw are
+# appended to ~/.cache/fake-claude/invocations.log (remote-control runs also
+# to ~/.cache/fake-claude/<repo>.log).
+
+if [[ ! -e /.dockerenv ]]; then
+  printf 'fake-claude is only for use in Docker container\n' >&2
+  exit 1
+fi
+
+cache="$HOME/.cache/fake-claude"
+
+write_invocation_log() {
+  local log_file="$1"
+  shift
+  mkdir -p "$cache"
+  {
+    printf '%s\n' "$*"
+    printf 'ENV_ANTHROPIC_API_KEY=%s\n' "${ANTHROPIC_API_KEY-}"
+    printf 'ENV_CLAUDE_CODE_OAUTH_TOKEN=%s\n' "${CLAUDE_CODE_OAUTH_TOKEN-}"
+    printf 'ENV_ANTHROPIC_BASE_URL=%s\n' "${ANTHROPIC_BASE_URL-}"
+  } >>"$log_file"
+}
+
+# The real CLI's rule: .projects["<workspace>"].hasTrustDialogAccepted must
+# be literally true. A missing or unparseable file is untrusted.
+workspace_is_trusted() {
+  python3 - "$HOME/.claude.json" "$1" <<'PY'
+import json
+import sys
+
+path, workspace = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f:
+        data = json.load(f)
+except (OSError, ValueError):
+    sys.exit(1)
+projects = data.get("projects") if isinstance(data, dict) else None
+entry = projects.get(workspace) if isinstance(projects, dict) else None
+sys.exit(0 if isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True else 1)
+PY
+}
+
+# A scenario can list workspaces here to model a Claude that keeps
+# rejecting the trust codvps seeded (the crash-loop the head must catch).
+workspace_is_force_refused() {
+  [[ -f "$cache/refuse-workspaces" ]] && grep -Fqx -- "$1" "$cache/refuse-workspaces"
+}
+
+case "${1:-}" in
+  --version)
+    echo "claude version 0.0.0-fake"
+    exit 0
+    ;;
+  auth)
+    if [[ $# -eq 2 && $2 == login ]]; then
+      write_invocation_log "$cache/invocations.log" "$@"
+      mkdir -p "$HOME/.claude"
+      printf '{}\n' >"$HOME/.claude/.credentials.json"
+      chmod 0600 "$HOME/.claude/.credentials.json"
+      echo "fake Claude auth login complete"
+      exit 0
+    fi
+    exit 1
+    ;;
+  remote-control)
+    if ! workspace_is_trusted "$PWD" || workspace_is_force_refused "$PWD"; then
+      mkdir -p "$cache"
+      printf '%s\n' "$PWD" >>"$cache/refusals.log"
+      # shellcheck disable=SC2016 # the backticks are literal CLI output
+      printf 'Error: Workspace not trusted. Please run `claude` in %s first to review and accept the workspace trust dialog.\n' "$PWD" >&2
+      exit 1
+    fi
+    prefix=""
+    previous=""
+    for argument in "$@"; do
+      if [[ $previous == "--remote-control-session-name-prefix" ]]; then
+        prefix="$argument"
+        break
+      fi
+      previous="$argument"
+    done
+    write_invocation_log "$cache/invocations.log" "$@"
+    repo_name=${prefix#cloud-}
+    if [[ $repo_name =~ ^[A-Za-z0-9._-]+$ && $repo_name != "." && $repo_name != ".." ]]; then
+      write_invocation_log "$cache/$repo_name.log" "$@"
+    fi
+    exec sleep infinity
+    ;;
+esac
+
+# Anything else would be an interactive Claude session.
+mkdir -p "$cache"
+printf '%s\n' "$(basename -- "$PWD")" >>"$cache/interactive-invocations.log"
+write_invocation_log "$cache/invocations.log" "$@"
+exit 1
