@@ -43,7 +43,7 @@ func TestHelpTextLayout(t *testing.T) {
 
 func TestHelpTextExactLines(t *testing.T) {
 	want := []string{
-		"  login github                 Authenticate GitHub, then set up VPS SSH access and Git identity",
+		"  login github [--auth-only]   Authenticate GitHub; --auth-only skips VPS SSH and Git identity setup",
 		"  pair codex                   Print a short-lived Codex pairing code as JSON",
 		"  config link <repo-url>       Keep your agent config (CLAUDE.md, skills, …) in a git repo: clone it and link it into place",
 		"  version                      Show version, commit and build date",
@@ -67,7 +67,7 @@ func TestHelpTextExactLines(t *testing.T) {
 // alternations are.
 func TestHelpFormsDoNotBracketLiterals(t *testing.T) {
 	bracketedWord := regexp.MustCompile(`<[a-z-]+>`)
-	allowed := map[string]bool{"<url>": true, "<name>": true, "<source>": true, "<args>": true, "<command>": true, "<list>": true, "<repo-url>": true}
+	allowed := map[string]bool{"<url>": true, "<name>": true, "<source>": true, "<args>": true, "<command>": true, "<list>": true, "<repo-url>": true, "<path>": true, "<provider>": true, "<repo>": true, "<key>": true}
 	for _, e := range helpEntries() {
 		for _, m := range bracketedWord.FindAllString(e.form, -1) {
 			if !allowed[m] {

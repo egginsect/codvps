@@ -8,10 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
-
-	"github.com/egginsect/codvps/internal/fsutil"
 )
 
 // ValidateName validates a repository name.
@@ -183,48 +180,4 @@ func CanonicalRemoteIdentity(gitURL string) (string, error) {
 	default:
 		return "", fmt.Errorf("unrecognized URL scheme: %s", u.Scheme)
 	}
-}
-
-// Read reads the repository registry from a file.
-func Read(path string) ([]string, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []string{}, nil
-		}
-		return nil, fmt.Errorf("failed to read registry: %w", err)
-	}
-
-	var names []string
-	for _, line := range strings.Split(string(content), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			names = append(names, line)
-		}
-	}
-
-	return names, nil
-}
-
-// Write writes the repository registry to a file atomically.
-// The list is sorted and deduplicated.
-func Write(path string, names []string) error {
-	// Deduplicate and sort
-	unique := make(map[string]bool)
-	var sorted []string
-	for _, name := range names {
-		if !unique[name] {
-			sorted = append(sorted, name)
-			unique[name] = true
-		}
-	}
-	sort.Strings(sorted)
-
-	// Write to file
-	content := strings.Join(sorted, "\n")
-	if len(sorted) > 0 {
-		content += "\n" // Trailing newline
-	}
-
-	return fsutil.AtomicWrite(path, []byte(content), 0600)
 }

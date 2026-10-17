@@ -47,6 +47,7 @@ UNIT=codex-remote@operator.service
 UNIT_FILE=/etc/systemd/system/codex-remote@.service
 SOCKET="$REMOTE_HOME/app-server-control/app-server-control.sock"
 TIMER=codex-remote-watchdog.timer
+REGISTRY_HELPER="$(dirname "${BASH_SOURCE[0]}")/registry.py"
 FAILED=0
 
 note() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
@@ -77,7 +78,7 @@ daemon_reachable() { CODEX_HOME="$REMOTE_HOME" codex app-server daemon version >
 daemon_pid() { cat "$CACHE/remote-control.pid" 2>/dev/null || true; }
 spawns() { wc -l <"$CACHE/daemon-spawns.log"; }
 starts() { grep -Fxc 'remote-control start --json' "$CACHE/invocations.log" || true; }
-registered() { grep -Fxq -- "$1" "$REGISTRY" 2>/dev/null; }
+registered() { python3 "$REGISTRY_HELPER" "$REGISTRY" has "$@"; }
 
 # enable_codex: head enable codex, then stop the watchdog timer it started.
 enable_codex() {
@@ -387,7 +388,8 @@ test_head_command_surface() {
   [[ $bare == "$help" ]] || note "bare codvps does not print the help"
   for line in \
     "$(help_line 'login codex' 'Authenticate Codex')" \
-    "$(help_line 'repo add <url>' 'Clone or reattach a repository and attach it to every enabled head')" \
+    '  repo add <url> [--dest <path>]' \
+    "$(printf '%31s%s' '' 'Clone or reattach a repository and attach it to every enabled head')" \
     "$(help_line 'repo list' 'List registered repositories and each head'"'"'s state')" \
     "$(help_line 'repo remove <name>' 'Deregister a repository and detach it from every head; keep the checkout')" \
     "$(help_line 'list' 'Show host heads and per-repository heads')" \
@@ -407,11 +409,12 @@ test_head_command_surface() {
   repo_flag_help=$("$CODVPS_BIN" repo --help)
   [[ $repo_help == "$repo_flag_help" ]] || note "repo help and repo --help differ"
   for line in 'Usage: codvps repo <command>' 'Repository commands:' \
-    '  add <url>          Clone or safely reattach a repository and attach it to every enabled head' \
+    '  add <url> [--dest <absolute-path>]  Clone or safely reattach a repository and attach it to every enabled head' \
     '  list               List registered repositories and their Claude head state' \
     '  remove <name>      Deregister a repository and detach it from every head; keep the checkout' \
     'Heads are host-scoped, not per repository: codvps enable|disable <claude|codex|cursor>.' \
-    'Every registered repository is attached to every enabled head.'; do
+    'Every registered repository is attached to every enabled head.' \
+    'New repositories default to repo_root (or HOME); registered paths never move.'; do
     grep -Fxq -- "$line" <<<"$repo_help" || note "codvps repo help is missing: $line"
   done
   for line in 'claude on' 'codex on' 'repo enable' 'repo disable' 'pick' '--trusted'; do

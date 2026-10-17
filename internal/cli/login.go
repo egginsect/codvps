@@ -10,6 +10,8 @@ import (
 	"github.com/egginsect/codvps/internal/paths"
 	"github.com/egginsect/codvps/internal/providers"
 	"github.com/egginsect/codvps/internal/runner"
+	"github.com/egginsect/codvps/internal/session"
+	"github.com/egginsect/codvps/internal/settings"
 )
 
 // handleLoginProvider handles `codvps login <provider>`.
@@ -20,6 +22,33 @@ func handleLoginProvider(p *providers.Provider, args []string) error {
 	layout, err := paths.New("")
 	if err != nil {
 		return fmt.Errorf("failed to initialize paths: %w", err)
+	}
+	cfg, err := settings.Read(layout)
+	if err != nil {
+		return err
+	}
+	if cfg.SessionMode == "manual" {
+		binary, err := session.Binary(layout, p.Name)
+		if err != nil {
+			return err
+		}
+		env, err := settings.Environment(layout)
+		if err != nil {
+			return err
+		}
+		ctx := login.NewContext()
+		ctx.HomeDir = layout.Home()
+		ctx.Runner = runner.NewExecRunner(env...)
+		ctx.EnvRunner = func(extra []string) runner.Runner {
+			return runner.NewExecRunner(append(append([]string(nil), env...), extra...)...)
+		}
+		command := p.Login.Command
+		command.Binary = binary
+		command.ExecutablePaths = nil
+		// Native login owns its prompts and authentication result. Manual mode
+		// does not seed Remote Control consent or grant workspace trust.
+		command.After = nil
+		return login.Run(ctx, command)
 	}
 	if err := (components.Catalog{Providers: providers.All()}).RequireSelected(layout, p.Name); err != nil {
 		return err
@@ -49,6 +78,12 @@ func runLogin(layout *paths.Layout, set providers.Set, name string, ctx *login.C
 
 const loginGitHubUsage = `Usage: codvps login github [flags]
 
+Use --auth-only for GitHub HTTPS authentication and its Git credential helper.
+It uses an existing gh, never installs software, and does not set up SSH or
+Git identity. With --non-interactive or --defer it only checks authentication
+and makes no changes. Configured GitHub/Git paths apply to child commands.
+
+Without --auth-only, the legacy guided VPS setup runs:
 No terminal is needed: when not logged in, GitHub's device flow starts
 anyway and prints its URL and one-time code (open it on any device), and each
 prompt without a terminal takes its default answer, reported as "assuming yes:
@@ -56,6 +91,7 @@ prompt without a terminal takes its default answer, reported as "assuming yes:
 a terminal, run sudo codvps install instead).
 
 Flags:
+  --auth-only               GitHub HTTPS authentication only (no VPS/SSH setup)
   --non-interactive         Never prompt and never start the GitHub login: a step
                              that would otherwise prompt reports pending instead
                              (auth exits 2 immediately if not already logged in)
@@ -72,12 +108,23 @@ Flags:
 
 // handleLoginGitHub handles 'login github' with its full flag set.
 func handleLoginGitHub(args []string) error {
+	return handleLoginGitHubWithContext(args, func(layout *paths.Layout) (*login.Context, error) {
+		return newGitHubLoginContext(layout, func(env ...string) runner.Runner {
+			return runner.NewExecRunner(env...)
+		})
+	})
+}
+
+// handleLoginGitHubWithContext keeps argument validation and dispatch
+// testable without real authentication, filesystem setup or subprocesses.
+func handleLoginGitHubWithContext(args []string, newContext func(*paths.Layout) (*login.Context, error)) error {
 	fs := flag.NewFlagSet("login github", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() {
 		_, _ = fmt.Fprint(os.Stdout, loginGitHubUsage)
 	}
 
+	authOnly := fs.Bool("auth-only", false, "GitHub HTTPS authentication only")
 	nonInteractive := fs.Bool("non-interactive", false, "run non-interactively")
 	keyChoice := fs.String("key", "", "skip | generate | existing:<path>")
 	passphraseEmpty := fs.Bool("passphrase-empty", false, "acknowledge an empty passphrase for non-interactive generation")
@@ -99,8 +146,35 @@ func handleLoginGitHub(args []string) error {
 		return invalidUsage("codvps login github [flags]")
 	}
 
-	ctx := login.NewContext()
-	code, err := login.GitHub(ctx, *nonInteractive, *keyChoice, *passphraseEmpty, *identityName, *identityEmail, *yes, *deferOnly)
+	if *authOnly {
+		var incompatible string
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "key", "passphrase-empty", "identity-name", "identity-email", "yes":
+				if incompatible == "" {
+					incompatible = f.Name
+				}
+			}
+		})
+		if incompatible != "" {
+			return &ExitError{Code: 2, Message: "--auth-only cannot be combined with --" + incompatible}
+		}
+	}
+
+	layout, err := paths.New("")
+	if err != nil {
+		return fmt.Errorf("failed to initialize paths: %w", err)
+	}
+	ctx, err := newContext(layout)
+	if err != nil {
+		return err
+	}
+	var code int
+	if *authOnly {
+		code, err = login.GitHubAuthOnly(ctx, *nonInteractive, *deferOnly)
+	} else {
+		code, err = login.GitHub(ctx, *nonInteractive, *keyChoice, *passphraseEmpty, *identityName, *identityEmail, *yes, *deferOnly)
+	}
 	if code != 0 {
 		msg := "github setup incomplete"
 		if err != nil {
@@ -109,4 +183,22 @@ func handleLoginGitHub(args []string) error {
 		return &ExitError{Code: code, Message: msg}
 	}
 	return nil
+}
+
+// newGitHubLoginContext applies non-secret configured paths to child
+// processes only, including runners requested later by login steps.
+func newGitHubLoginContext(layout *paths.Layout, newRunner func(...string) runner.Runner) (*login.Context, error) {
+	env, err := settings.Environment(layout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read login settings: %w", err)
+	}
+	ctx := login.NewContext()
+	ctx.HomeDir = layout.Home()
+	ctx.Runner = newRunner(env...)
+	ctx.EnvRunner = func(extra []string) runner.Runner {
+		combined := append([]string{}, env...)
+		combined = append(combined, extra...)
+		return newRunner(combined...)
+	}
+	return ctx, nil
 }

@@ -479,7 +479,7 @@ func TestDoctorWarnsAboutAUnitWithoutRepository(t *testing.T) {
 	if rep.Failures != 0 {
 		t.Fatalf("an orphaned unit failed doctor:\n%s", out)
 	}
-	mustContain(t, out, "WARN: enabled or running unit claude-remote@missing-dir.service has no repository at "+filepath.Join(h.home, "missing-dir"))
+	mustContain(t, out, `WARN: enabled or running unit claude-remote@missing-dir.service has no usable registered checkout: repository "missing-dir" is not registered`)
 }
 
 // A failed Claude unit is a failure, and its journal tail is shown.

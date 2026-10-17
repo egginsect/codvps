@@ -3,6 +3,10 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"github.com/egginsect/codvps/internal/paths"
+	"github.com/egginsect/codvps/internal/repo"
+	"github.com/egginsect/codvps/internal/settings"
+	"os"
 	"sort"
 	"strings"
 
@@ -69,14 +73,14 @@ func providerInternals(set providers.Set) map[string]providers.Internal {
 // systemd or sudo, where HOME may not be set at all for root, and every
 // path they touch belongs to the operator's home, never the caller's own.
 
-const shellExecUsage = "codvps internal shell-exec [--provider NAME] [--unset VAR]... -- CMD [ARGS...]"
+const shellExecUsage = "codvps internal shell-exec [--provider NAME] [--repo NAME] [--unset VAR]... -- CMD [ARGS...]"
 
 // internalShellExec is `codvps internal shell-exec`: replace this process
 // with CMD, started in the operator's login-shell environment minus the
 // named provider's Env.Remove and every --unset variable. It returns only
 // when CMD could not be started.
 func internalShellExec(args []string, set providers.Set, shell shellenv.Options) error {
-	var provider string
+	var provider, repository string
 	var remove []string
 	i := 0
 parse:
@@ -84,13 +88,16 @@ parse:
 		switch args[i] {
 		case "--":
 			break parse
-		case "--provider", "--unset":
+		case "--provider", "--repo", "--unset":
 			if i+1 >= len(args) {
 				return invalidUsage(shellExecUsage)
 			}
-			if args[i] == "--provider" {
+			switch args[i] {
+			case "--provider":
 				provider = args[i+1]
-			} else {
+			case "--repo":
+				repository = args[i+1]
+			case "--unset":
 				remove = append(remove, args[i+1])
 			}
 			i++
@@ -113,6 +120,52 @@ parse:
 		if p.Env != nil {
 			remove = append(remove, p.Env.Remove...)
 		}
+	}
+	if provider != "" || repository != "" {
+		layout, err := paths.New("")
+		if err != nil {
+			return err
+		}
+		overrides, err := settings.Environment(layout)
+		if err != nil {
+			return err
+		}
+		replace := shell.Exec
+		shell.Exec = func(path string, args, env []string) error {
+			var keys []string
+			for _, entry := range overrides {
+				key, _, _ := strings.Cut(entry, "=")
+				keys = append(keys, key)
+			}
+			return replace(path, args, append(shellenv.Remove(env, keys...), overrides...))
+		}
+	}
+	if repository != "" {
+		layout, err := paths.New("")
+		if err != nil {
+			return err
+		}
+		checkout, err := repo.CheckoutPath(layout, repository)
+		if err != nil {
+			return err
+		}
+		git, err := sessionGit(layout)
+		if err != nil {
+			return err
+		}
+		if err := repo.IsPrimaryGitCheckout(git, checkout); err != nil {
+			return err
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := os.Chdir(checkout); err != nil {
+			return err
+		}
+		// Production exec replaces this process. Restore cwd if launch fails,
+		// or when a test's injected executor returns.
+		defer func() { _ = os.Chdir(cwd) }()
 	}
 	return shell.Run(remove, argv)
 }

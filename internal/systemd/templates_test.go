@@ -57,7 +57,7 @@ func TestClaudeRemoteServiceTemplate_ScrubsCredentialsAndRestartsAlways(t *testi
 		"Restart=always",
 		"RestartSec=5",
 		"Environment=PATH=/usr/local/bin:/usr/bin:/bin",
-		"WorkingDirectory=%h/%i",
+		"WorkingDirectory=%h",
 		"After=network-online.target",
 		"Wants=network-online.target",
 		"WantedBy=default.target",
@@ -74,7 +74,7 @@ func TestClaudeRemoteServiceTemplate_ScrubsCredentialsAndRestartsAlways(t *testi
 // prefix and never opens an interactive session in the checkout.
 func TestClaudeRemoteServiceTemplate_RemoteControlExecStartIsNeverInteractive(t *testing.T) {
 	lines := unitLines(t, claudeUnit(t, ClaudeRemoteTemplate).Content)
-	want := "ExecStart=/usr/local/bin/codvps internal shell-exec --provider claude -- claude remote-control --spawn worktree --capacity 4 --no-create-session-in-dir --remote-control-session-name-prefix cloud-%i"
+	want := "ExecStart=/usr/local/bin/codvps internal shell-exec --provider claude --repo %i -- claude remote-control --spawn worktree --capacity 4 --no-create-session-in-dir --remote-control-session-name-prefix cloud-%i"
 	var execStarts []string
 	for _, l := range lines {
 		if strings.HasPrefix(l, "ExecStart") {
@@ -135,8 +135,8 @@ func TestCursorRemoteServiceTemplate_AbsolutePathsAndHostnameUniqueness(t *testi
 	}
 	lines := unitLines(t, u.Content)
 	for _, want := range []string{
-		"WorkingDirectory=%h/%i",
-		"ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor -- %h/.local/bin/agent worker --name %H-%i --worker-dir %h/%i --data-dir %h/.local/share/cursor-agent/codvps-workers/%i start",
+		"WorkingDirectory=%h",
+		"ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor --repo %i -- %h/.local/bin/agent worker --name %H-%i --worker-dir . --data-dir %h/.local/share/cursor-agent/codvps-workers/%i start",
 		"Restart=always",
 		"RestartSec=5",
 		"WantedBy=default.target",
@@ -152,7 +152,7 @@ func TestCursorRemoteServiceTemplate_AbsolutePathsAndHostnameUniqueness(t *testi
 		}
 	}
 	// Verify hostname-based uniqueness
-	if !hasLine(lines, "ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor -- %h/.local/bin/agent worker --name %H-%i --worker-dir %h/%i --data-dir %h/.local/share/cursor-agent/codvps-workers/%i start") {
+	if !hasLine(lines, "ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor --repo %i -- %h/.local/bin/agent worker --name %H-%i --worker-dir . --data-dir %h/.local/share/cursor-agent/codvps-workers/%i start") {
 		t.Errorf("cursor-remote@.service worker name must use %%H (hostname), not %%h (home)")
 	}
 }
@@ -183,7 +183,11 @@ func TestHeadUnitsStartThroughShellExec(t *testing.T) {
 		{cursorUnit(t, CursorRemoteTemplate), "cursor", "%h/.local/bin/agent worker "},
 		{OpenCodeUserUnits()[0], "opencode", "%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096"},
 	} {
-		prefix := "ExecStart=/usr/local/bin/codvps internal shell-exec --provider " + tc.provider + " -- " + tc.command
+		repoOption := ""
+		if tc.provider == "claude" || tc.provider == "cursor" {
+			repoOption = " --repo %i"
+		}
+		prefix := "ExecStart=/usr/local/bin/codvps internal shell-exec --provider " + tc.provider + repoOption + " -- " + tc.command
 		var execStarts []string
 		for _, l := range unitLines(t, tc.unit.Content) {
 			if strings.HasPrefix(l, "ExecStart") {

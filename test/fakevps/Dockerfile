@@ -37,8 +37,7 @@ RUN chmod 0755 /usr/local/bin/npm /usr/local/bin/claude /usr/local/bin/codex \
 # embeds (internal/systemd/units), so scenarios run the exact
 # claude-remote@.service and claude-remote.slice that ship. /etc/systemd/user
 # is searched by every user's --user manager. python3 above is only for the
-# fakes (fakes/claude's workspace-trust check, fakes/codex's daemon), not
-# for codvps.
+# fakes and scenario fixture helpers, not for codvps.
 COPY internal/systemd/units/claude-remote@.service /etc/systemd/user/claude-remote@.service
 COPY internal/systemd/units/claude-remote.slice /etc/systemd/user/claude-remote.slice
 

@@ -14,8 +14,8 @@ import (
 const maxStateFileBytes = 1 << 20
 
 // checkFileSizeBound rejects a file larger than max before it is read via
-// registry.Read (which internal/repo does not own and so cannot bound
-// internally). A missing file is fine.
+// registry.Read. The registry parser also bounds the actual read to prevent
+// a growing file from bypassing this advisory check. A missing file is fine.
 func checkFileSizeBound(path string, max int64) error {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -31,8 +31,8 @@ func checkFileSizeBound(path string, max int64) error {
 }
 
 // readNamesBounded is registry.Read with a size check first, used at every
-// call site in this package that reads a registry-format (one name per
-// line) file that an operator -- or a corrupted/hostile write -- controls.
+// call site in this package that reads an operator-controlled registry,
+// either legacy names or versioned path records.
 func readNamesBounded(path string) ([]string, error) {
 	if err := checkFileSizeBound(path, maxStateFileBytes); err != nil {
 		return nil, err

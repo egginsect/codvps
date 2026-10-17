@@ -466,7 +466,7 @@ test_repo_without_claude_unit_is_not_a_doctor_error() {
   systemctl --user enable claude-remote@missing-dir.service >/dev/null 2>&1
   run codvps doctor
   systemctl --user disable claude-remote@missing-dir.service >/dev/null 2>&1 || true
-  [[ $OUT == *'WARN: enabled or running unit claude-remote@missing-dir.service has no repository at '"$HOME"'/missing-dir'* ]] ||
+  [[ $OUT == *'WARN: enabled or running unit claude-remote@missing-dir.service has no usable registered checkout: repository "missing-dir" is not registered'* ]] ||
     note "doctor did not warn about a unit without a repository: $OUT"
   ! grep -q '^FAIL:.*missing-dir' <<<"$OUT" || note "doctor failed on a unit without a repository: $OUT"
 }

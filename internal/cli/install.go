@@ -142,6 +142,16 @@ func doctorComponents(layout *paths.Layout, set providers.Set, heads *head.Heads
 // runDoctor is `codvps doctor`: exit 0 healthy, 1 with failures (already
 // printed in the report), 2 when doctor could not run its checks.
 func runDoctor() error {
+	if manual, err := manualDoctor(); manual || err != nil {
+		if err != nil {
+			code := 2
+			if manual {
+				code = 1
+			}
+			return &ExitError{Code: code, Message: err.Error()}
+		}
+		return nil
+	}
 	env, err := newHeadEnv()
 	if err != nil {
 		return &ExitError{Code: 2, Message: err.Error()}

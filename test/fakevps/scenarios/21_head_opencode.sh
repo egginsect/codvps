@@ -29,7 +29,8 @@ select_components() {
   sudo chmod 0644 "$COMPONENTS"
 }
 
-# shellcheck disable=SC2317
+# Invoked indirectly by the EXIT trap.
+# shellcheck disable=SC2317,SC2329
 cleanup() {
   "$CODVPS_BIN" disable opencode >/dev/null 2>&1 || true
   sudo rm -f /usr/local/bin/opencode /tmp/opencode-serve.sock

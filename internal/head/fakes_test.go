@@ -14,6 +14,7 @@ import (
 	"github.com/egginsect/codvps/internal/claudeconfig"
 	"github.com/egginsect/codvps/internal/paths"
 	"github.com/egginsect/codvps/internal/registry"
+	"github.com/egginsect/codvps/internal/repo"
 	"github.com/egginsect/codvps/internal/runner"
 )
 
@@ -57,7 +58,14 @@ func (f *fakeSystemd) unit(name string) *fakeUnit {
 // starts reports whether claude remote-control would stay up for unit.
 func (f *fakeSystemd) starts(unit string) bool {
 	name := strings.TrimSuffix(strings.TrimPrefix(unit, "claude-remote@"), ".service")
-	workspace := filepath.Join(f.home, name)
+	layout, err := paths.NewForHome(f.home, "")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	workspace, err := repo.CheckoutPath(layout, name)
+	if err != nil {
+		f.t.Fatal(err)
+	}
 	trusted, err := claudeconfig.WorkspaceTrusted(f.home, workspace)
 	if err != nil {
 		f.t.Fatalf("fake claude could not read trust: %v", err)

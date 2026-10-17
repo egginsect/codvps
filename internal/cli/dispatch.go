@@ -10,6 +10,8 @@ import (
 
 var commands = map[string]Command{
 	"login":      &loginCmd{},
+	"run":        &runCmd{},
+	"remote":     &remoteCmd{},
 	"repo":       &repoCmd{},
 	"enable":     &enableCmd{},
 	"disable":    &disableCmd{},
@@ -70,8 +72,11 @@ func helpEntries() []helpEntry {
 	}
 	heads := "<" + strings.Join(headProviders(set).Names(), "|") + ">"
 	entries = append(entries,
-		helpEntry{"login github", "Authenticate GitHub, then set up VPS SSH access and Git identity"},
-		helpEntry{"repo add <url>", "Clone or reattach a repository and attach it to every enabled head"},
+		helpEntry{"login github [--auth-only]", "Authenticate GitHub; --auth-only skips VPS SSH and Git identity setup"},
+		helpEntry{"repo add <url> [--dest <path>]", "Clone or reattach a repository and attach it to every enabled head"},
+		helpEntry{"run <provider> <repo> [-- args]", "Run a native coding CLI in a registered checkout"},
+		helpEntry{"remote run <claude|cursor> <repo>", "Run a native per-repository remote worker (manual mode)"},
+		helpEntry{"remote <start|stop|pair|status> codex", "Manage the native host-wide Codex daemon (manual mode)"},
 		helpEntry{"repo list", "List registered repositories and each head's state"},
 		helpEntry{"repo remove <name>", "Deregister a repository and detach it from every head; keep the checkout"},
 		helpEntry{"enable " + heads, "Enable a host head and attach every registered repository"},
@@ -89,6 +94,7 @@ func helpEntries() []helpEntry {
 }
 
 var helpConfigEntries = []helpEntry{
+	{"config get|set|unset <key> [value]", "Configure repository root, GitHub paths, or session mode"},
 	{"config link <repo-url>", "Keep your agent config (CLAUDE.md, skills, …) in a git repo: clone it and link it into place"},
 }
 

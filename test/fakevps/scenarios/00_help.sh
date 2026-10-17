@@ -5,7 +5,7 @@ set -euo pipefail
 # Enabled: (CLI help output)
 
 test_help_displays_usage() {
-  local output
+  local output form
   output=$("$CODVPS_BIN" help)
   if [[ ! "$output" =~ "Usage: codvps" ]]; then
     echo "FAIL: help output does not contain 'Usage: codvps'"
@@ -23,6 +23,14 @@ test_help_displays_usage() {
     echo "FAIL: help output does not contain the top-level 'enable|disable <cli>' forms"
     return 1
   fi
+  for form in 'login github [--auth-only]' 'repo add <url> [--dest <path>]' \
+    'config get|set|unset <key> [value]' 'run <provider> <repo> [-- args]' \
+    'remote run <claude|cursor> <repo>' 'remote <start|stop|pair|status> codex'; do
+    if ! grep -Fq -- "  $form" <<<"$output"; then
+      echo "FAIL: help output does not contain '$form'"
+      return 1
+    fi
+  done
   echo "PASS: help displays usage information"
   return 0
 }

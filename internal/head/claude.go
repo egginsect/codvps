@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -178,7 +177,11 @@ func (c *Claude) attach(names []string) error {
 	// later, and it would then be refused without it.
 	workspaces := make([]string, 0, len(names))
 	for _, name := range names {
-		workspaces = append(workspaces, filepath.Join(home, name))
+		dest, err := repo.CheckoutPath(c.layout, name)
+		if err != nil {
+			return err
+		}
+		workspaces = append(workspaces, dest)
 	}
 	if err := claudeconfig.SeedWorkspaceTrust(home, workspaces); err != nil {
 		return fmt.Errorf("failed to seed Claude workspace trust: %w", err)

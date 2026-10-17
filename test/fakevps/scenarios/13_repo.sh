@@ -36,10 +36,21 @@ WORK="$HOME/tmp/repo13"
 SEED="$WORK/seed"
 REMOTE="$WORK/remote.git"
 NAME=remote
+REGISTRY="$HOME/.config/codvps/repositories"
 DEST="$HOME/$NAME"
+REGISTRY_HELPER="$(dirname "${BASH_SOURCE[0]}")/registry.py"
+EXTERNAL_ROOT=""
 FAILED=0
 
 note() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
+
+cleanup() {
+  if [[ -n $EXTERNAL_ROOT ]]; then
+    "$CODVPS_BIN" config unset repo_root >/dev/null 2>&1 || true
+    rm -rf "$EXTERNAL_ROOT"
+  fi
+}
+trap cleanup EXIT
 
 setup() {
   rm -rf "$WORK" "$DEST" "$HOME/linked" "$HOME/rollback13" "$HOME/prune13" "$HOME/stray13" \
@@ -111,7 +122,7 @@ test_add() {
   if [[ ! -d "$DEST/.git" ]]; then
     note "repo add did not create a git checkout at $DEST"
   fi
-  if ! grep -qFx "$NAME" "$HOME/.config/codvps/repositories"; then
+  if ! registry_has "$NAME" "$DEST"; then
     note "repo add did not register $NAME in the repositories file"
   fi
 }
@@ -128,7 +139,7 @@ test_readd_is_idempotent() {
   if ! grep -qFx "Repository added: $REMOTE" <<<"$out"; then
     note "re-add did not report the expected message: $out"
   fi
-  count=$(grep -cFx "$NAME" "$HOME/.config/codvps/repositories" || true)
+  count=$(python3 "$REGISTRY_HELPER" "$REGISTRY" count "$NAME" "$DEST")
   if [[ $count -ne 1 ]]; then
     note "re-adding the same repository produced $count registry entries, want 1"
   fi
@@ -175,7 +186,7 @@ test_remove_keeps_checkout() {
   if [[ ! -d "$DEST/.git" ]]; then
     note "repo remove deleted the working checkout at $DEST"
   fi
-  if grep -qFx "$NAME" "$HOME/.config/codvps/repositories" 2>/dev/null; then
+  if registry_has "$NAME"; then
     note "repo remove left $NAME registered"
   fi
 }
@@ -201,7 +212,7 @@ run() {
   set -e
 }
 
-registry_has() { grep -qFx "$1" "$HOME/.config/codvps/repositories" 2>/dev/null; }
+registry_has() { python3 "$REGISTRY_HELPER" "$REGISTRY" has "$@"; }
 list_has_row() { grep -q "^$1 " <<<"$OUT"; }
 claude_unit_enabled() { systemctl --user is-enabled --quiet "claude-remote@$1.service" 2>/dev/null; }
 
@@ -283,7 +294,7 @@ test_linked_worktree_is_not_a_second_repository() {
   [[ $RC -eq 0 ]] || note "re-adding $NAME failed (rc=$RC): $OUT"
   git -C "$DEST" worktree add -q -b wt13 "$HOME/remote-wt" origin/main
   [[ -f $HOME/remote-wt/.git ]] || note "git did not create a linked worktree with a .git file"
-  printf 'remote-wt\n' >>"$HOME/.config/codvps/repositories"
+  python3 "$REGISTRY_HELPER" "$REGISTRY" add remote-wt "$HOME/remote-wt"
   run "$CODVPS_BIN" repo list
   [[ $RC -eq 0 ]] || note "repo list with a forged worktree entry failed (rc=$RC): $OUT"
   ! list_has_row remote-wt || note "a linked worktree appeared in repo list: $OUT"
@@ -294,6 +305,82 @@ test_linked_worktree_is_not_a_second_repository() {
   git -C "$DEST" branch -q -D wt13
   run "$CODVPS_BIN" repo remove "$NAME"
   [[ $RC -eq 0 ]] || note "final repo remove $NAME failed (rc=$RC): $OUT"
+}
+
+# A real legacy checkout stays under HOME when an external root is configured.
+# New adds persist explicit paths, including an override whose basename differs
+# from its registered name. Changing or unsetting the root never remaps either.
+test_configured_and_explicit_checkout_paths() {
+  local root explicit name
+  EXTERNAL_ROOT=$(mktemp -d '/tmp/codvps repo13.XXXXXX')
+  root="$EXTERNAL_ROOT/root one"
+  explicit="$EXTERNAL_ROOT/different checkout name"
+  fixture external13
+  fixture explicit13
+  printf '%s\n' "$NAME" >"$REGISTRY"
+  chmod 0600 "$REGISTRY"
+
+  run "$CODVPS_BIN" config set repo_root "$root"
+  [[ $RC -eq 0 ]] || note "config set repo_root failed (rc=$RC): $OUT"
+  run "$CODVPS_BIN" config get repo_root
+  [[ $RC -eq 0 && $OUT == "$root" ]] || note "config get did not return the external root: $OUT"
+  [[ "$(stat -c '%U:%a' "$HOME/.config/codvps/settings.json")" == "$(id -un):600" ]] ||
+    note "settings are not operator-owned mode 600"
+
+  run "$CODVPS_BIN" repo list
+  [[ $RC -eq 0 ]] || note "listing a legacy registration with an external root failed: $OUT"
+  grep -Fxq "$(printf '%-24s %-40s %s' "$NAME" "$DEST" -)" <<<"$OUT" ||
+    note "the legacy registration moved away from HOME: $OUT"
+
+  run "$CODVPS_BIN" repo add "$WORK/external13.git"
+  [[ $RC -eq 0 ]] || note "adding under the configured root failed (rc=$RC): $OUT"
+  [[ -d "$root/external13/.git" && ! -e "$HOME/external13" ]] ||
+    note "the configured root was not used for external13"
+  registry_has external13 "$root/external13" || note "external13 has no explicit registered path"
+  registry_has "$NAME" || note "JSON migration lost the legacy registration"
+
+  run "$CODVPS_BIN" repo add "$WORK/explicit13.git" --dest "$explicit"
+  [[ $RC -eq 0 ]] || note "repo add --dest failed (rc=$RC): $OUT"
+  [[ -d "$explicit/.git" && ! -e "$root/explicit13" ]] || note "--dest did not override repo_root"
+  registry_has explicit13 "$explicit" || note "--dest was not persisted by registered name"
+
+  run "$CODVPS_BIN" config set repo_root "$EXTERNAL_ROOT/root two"
+  [[ $RC -eq 0 ]] || note "changing repo_root failed (rc=$RC): $OUT"
+  for name in remote external13 explicit13; do
+    run "$CODVPS_BIN" repo add "$WORK/$name.git"
+    [[ $RC -eq 0 ]] || note "re-adding $name after changing repo_root failed: $OUT"
+  done
+  [[ ! -e "$EXTERNAL_ROOT/root two" ]] || note "changing repo_root moved or duplicated a checkout"
+  registry_has external13 "$root/external13" || note "changing repo_root remapped external13"
+  registry_has explicit13 "$explicit" || note "changing repo_root remapped explicit13"
+
+  run "$CODVPS_BIN" repo add "$WORK/explicit13.git" --dest "$EXTERNAL_ROOT/remapped"
+  [[ $RC -ne 0 && $OUT == *'refusing to move or remap'* ]] || note "an explicit remap was not refused: $OUT"
+  [[ ! -e "$EXTERNAL_ROOT/remapped" ]] || note "a refused remap created a checkout"
+
+  run "$CODVPS_BIN" config unset repo_root
+  [[ $RC -eq 0 ]] || note "config unset repo_root failed (rc=$RC): $OUT"
+  run "$CODVPS_BIN" config get repo_root
+  [[ $RC -eq 0 && $OUT == "$HOME" ]] || note "unsetting repo_root did not restore the HOME default: $OUT"
+  run "$CODVPS_BIN" repo list
+  [[ $RC -eq 0 ]] || note "listing persisted paths after unsetting repo_root failed: $OUT"
+  for name in "$NAME" external13 explicit13; do
+    list_has_row "$name" || note "repo list lost $name after unsetting repo_root: $OUT"
+  done
+  grep -Fxq "$(printf '%-24s %-40s %s' "$NAME" "$DEST" -)" <<<"$OUT" ||
+    note "the legacy path changed during JSON migration: $OUT"
+  grep -Fxq "$(printf '%-24s %-40s %s' external13 "$root/external13" -)" <<<"$OUT" ||
+    note "repo list did not retain the configured checkout path: $OUT"
+  grep -Fxq "$(printf '%-24s %-40s %s' explicit13 "$explicit" -)" <<<"$OUT" ||
+    note "repo list did not retain the explicit checkout path: $OUT"
+
+  for name in "$NAME" external13 explicit13; do
+    run "$CODVPS_BIN" repo remove "$name"
+    [[ $RC -eq 0 ]] || note "removing $name failed (rc=$RC): $OUT"
+    ! registry_has "$name" || note "removing $name left its registration"
+  done
+  [[ -d "$DEST/.git" && -d "$root/external13/.git" && -d "$explicit/.git" ]] ||
+    note "removing registrations deleted a legacy or external checkout"
 }
 
 setup
@@ -309,9 +396,10 @@ test_stray_clone_is_not_a_repository
 test_remove_keeps_checkout
 test_unregistered_directory_cannot_be_managed
 test_linked_worktree_is_not_a_second_repository
+test_configured_and_explicit_checkout_paths
 
 if [[ $FAILED -ne 0 ]]; then
   echo "FAIL: one or more repo assertions failed"
   exit 1
 fi
-echo "PASS: repo add/list/remove behave as expected, the registry alone decides membership, and remove keeps the checkout"
+echo "PASS: repo add/list/remove behave as expected, legacy and external paths stay pinned, and remove keeps the checkout"

@@ -36,6 +36,8 @@ FLAG="$HOME/.config/codvps/claude-head-enabled"
 REGISTRY="$HOME/.config/codvps/repositories"
 COMPONENTS=/etc/codvps/components.json
 UNIT_FILE=/etc/systemd/user/claude-remote@.service
+REGISTRY_HELPER="$(dirname "${BASH_SOURCE[0]}")/registry.py"
+EXTERNAL_ROOT=""
 FAILED=0
 
 note() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
@@ -49,13 +51,17 @@ select_components() {
 cleanup() {
   "$CODVPS_BIN" head disable claude >/dev/null 2>&1 || true
   systemctl --user unset-environment ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_BASE_URL >/dev/null 2>&1 || true
+  if [[ -n $EXTERNAL_ROOT ]]; then
+    "$CODVPS_BIN" config unset repo_root >/dev/null 2>&1 || true
+    rm -rf "$EXTERNAL_ROOT"
+  fi
   sudo rm -rf /etc/codvps
 }
 trap cleanup EXIT
 
 unit_active() { systemctl --user is-active --quiet "claude-remote@$1.service"; }
 unit_enabled() { systemctl --user is-enabled --quiet "claude-remote@$1.service"; }
-registered() { grep -Fxq -- "$1" "$REGISTRY" 2>/dev/null; }
+registered() { python3 "$REGISTRY_HELPER" "$REGISTRY" has "$@"; }
 
 # Mirrors the Claude CLI's own rule for ~/.claude.json workspace trust.
 trusted() {
@@ -163,8 +169,9 @@ test_unit_installed() {
   [[ -f $UNIT_FILE ]] || note "$UNIT_FILE is not installed"
   grep -Fq 'UnsetEnvironment=ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_BASE_URL' "$UNIT_FILE" ||
     note "claude-remote@.service does not scrub provider credentials"
-  grep -Fq 'ExecStart=/usr/local/bin/codvps internal shell-exec --provider claude -- claude remote-control' "$UNIT_FILE" ||
+  grep -Fq 'ExecStart=/usr/local/bin/codvps internal shell-exec --provider claude --repo %i -- claude remote-control' "$UNIT_FILE" ||
     note "claude-remote@.service does not start claude through codvps internal shell-exec"
+  grep -Fxq 'WorkingDirectory=%h' "$UNIT_FILE" || note "Claude must resolve the registered checkout after starting from HOME"
   grep -Fxq 'Restart=always' "$UNIT_FILE" || note "claude-remote@.service is not Restart=always"
   grep -Fq -- '--no-create-session-in-dir' "$UNIT_FILE" || note "claude-remote@.service may open interactive sessions"
 }
@@ -301,6 +308,47 @@ test_repo_add_auto_attaches() {
   unit_active auto-attach || note "head enable did not bring auto-attach back"
 }
 
+# Exercise the real user service with a checkout outside HOME, including spaces.
+# The fake provider must run there after changing repo_root, and deregistration
+# must stop the same instance without deleting the external checkout.
+test_external_checkout_uses_registered_path() {
+  local checkout pid attempt cwd
+  EXTERNAL_ROOT=$(mktemp -d '/tmp/codvps head15.XXXXXX')
+  checkout="$EXTERNAL_ROOT/workspace/external15"
+  fixture external15
+  run "$CODVPS_BIN" config set repo_root "$EXTERNAL_ROOT/workspace"
+  [[ $RC -eq 0 ]] || note "configuring an external Claude root failed: $OUT"
+  run "$CODVPS_BIN" repo add "$WORK/external15.git" </dev/null
+  [[ $RC -eq 0 ]] || note "adding an external Claude checkout failed (rc=$RC): $OUT"
+  registered external15 "$checkout" || note "external15 was not registered at its actual path"
+  trusted "$checkout" || note "Claude did not trust the external checkout"
+  ! trusted "$HOME/external15" || note "Claude trusted HOME/name instead of the external checkout"
+  unit_active external15 || note "the external Claude unit did not start"
+
+  run "$CODVPS_BIN" config set repo_root "$EXTERNAL_ROOT/a different root"
+  [[ $RC -eq 0 ]] || note "changing the root with a running Claude head failed: $OUT"
+  run systemctl --user restart claude-remote@external15.service
+  [[ $RC -eq 0 ]] || note "restarting the external Claude unit failed: $OUT"
+  cwd=""
+  for ((attempt = 1; attempt <= 50; attempt++)); do
+    pid=$(systemctl --user show claude-remote@external15.service -p MainPID --value)
+    cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+    [[ $cwd == "$checkout" ]] && break
+    sleep 0.1
+  done
+  [[ $cwd == "$checkout" ]] || note "Claude ran in '$cwd' after changing repo_root, want '$checkout'"
+  unit_active external15 || note "the external Claude head did not stay active"
+
+  run "$CODVPS_BIN" repo remove external15
+  [[ $RC -eq 0 ]] || note "removing the external Claude registration failed: $OUT"
+  ! unit_active external15 || note "removing external15 left its Claude worker running"
+  ! unit_enabled external15 || note "removing external15 left its Claude unit enabled"
+  ! registered external15 || note "removing external15 left its registration"
+  [[ -d "$checkout/.git" ]] || note "removing external15 deleted the checkout"
+  run "$CODVPS_BIN" config unset repo_root
+  [[ $RC -eq 0 ]] || note "restoring the default root after the external Claude test failed: $OUT"
+}
+
 test_list_and_status() {
   local list status
   list=$("$CODVPS_BIN" head list)
@@ -361,6 +409,7 @@ test_restart_always
 test_lifecycle_is_host_scoped
 test_removed_command_spellings
 test_repo_add_auto_attaches
+test_external_checkout_uses_registered_path
 test_list_and_status
 test_old_commands
 test_fails_loudly_when_untrusted
