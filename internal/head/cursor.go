@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -90,13 +91,18 @@ func (c *Cursor) SetEnabled(enable bool) error {
 // Reconcile makes the cursor-remote@ instances match the registry and the
 // host-wide switch.
 func (c *Cursor) Reconcile() error {
-	names, err := repo.PruneVanishedCheckouts(c.layout, c.git, c, false)
-	if err != nil {
-		return err
-	}
 	enabled, err := repo.CursorHeadFlagSet(c.layout)
 	if err != nil {
 		return err
+	}
+	// Turning the head off must not depend on readable/valid checkouts.
+	// A broken registry must never leave an existing worker running.
+	var names []string
+	if enabled {
+		names, err = repo.PruneVanishedCheckouts(c.layout, c.git, c, false)
+		if err != nil {
+			return err
+		}
 	}
 	desired := make(map[string]bool, len(names))
 	if enabled {
@@ -145,8 +151,8 @@ func (c *Cursor) attach(names []string) error {
 		}
 		if err := c.waitActive(unit); err != nil {
 			if err := c.disableNow(unit); err != nil {
-			return fmt.Errorf("failed to disable %s: %w", unit, err)
-		}
+				return fmt.Errorf("failed to disable %s: %w", unit, err)
+			}
 			return fmt.Errorf("Cursor head for %s failed to stay active: %w", name, err)
 		}
 	}
@@ -170,21 +176,48 @@ func (c *Cursor) requireCredential() error {
 	return nil
 }
 
-// instances lists every cursor-remote@ instance, optionally only enabled ones.
-func (c *Cursor) instances(onlyEnabled bool) ([]cursorInstance, error) {
-	var inst []cursorInstance
-	out, _, _, _ := c.r.Run("systemctl", "--user", "list-unit-files", cursorUnitGlob, "--no-legend", "--no-pager")
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) < 2 || !strings.HasPrefix(f[0], cursorUnitPrefix) {
-			continue
+// instances includes loaded instances as well as, when requested, unit files.
+// Instantiated template services need not appear in list-unit-files, so that
+// query alone cannot discover every running worker that disable must stop.
+func (c *Cursor) instances(withUnitFiles bool) ([]cursorInstance, error) {
+	queries := [][]string{{"--user", "list-units", cursorUnitGlob, "--all", "--plain", "--no-legend", "--no-pager"}}
+	if withUnitFiles {
+		queries = append(queries, []string{"--user", "list-unit-files", cursorUnitGlob, "--no-legend", "--no-pager"})
+	}
+	seen := make(map[string]bool)
+	var instances []cursorInstance
+	for _, args := range queries {
+		stdout, stderr, code, err := c.r.Run("systemctl", args...)
+		if code != 0 || err != nil {
+			// list-unit-files exits 1 without output when nothing matches.
+			// ExecRunner returns an ExitError for that ordinary exit status;
+			// launch/IO failures must still be reported, even without output.
+			var exitErr *exec.ExitError
+			expectedExit := err == nil || (errors.As(err, &exitErr) && exitErr.ExitCode() == 1)
+			if args[1] == "list-unit-files" && code == 1 && expectedExit && strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
+				continue
+			}
+			return nil, fmt.Errorf("failed to list %s instances (systemctl %s): %s",
+				cursorUnitGlob, args[1], describeFailure(stderr, code, err))
 		}
-		name := strings.TrimSuffix(strings.TrimPrefix(f[0], cursorUnitPrefix), cursorUnitSuffix)
-		if !onlyEnabled || strings.HasPrefix(f[1], "enabled") {
-			inst = append(inst, cursorInstance{unit: f[0], name: name})
+		for _, line := range strings.Split(stdout, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			unit := fields[0]
+			if !strings.HasPrefix(unit, cursorUnitPrefix) || !strings.HasSuffix(unit, cursorUnitSuffix) {
+				continue
+			}
+			name := strings.TrimSuffix(strings.TrimPrefix(unit, cursorUnitPrefix), cursorUnitSuffix)
+			if name == "" || seen[unit] {
+				continue
+			}
+			seen[unit] = true
+			instances = append(instances, cursorInstance{unit: unit, name: name})
 		}
 	}
-	return inst, nil
+	return instances, nil
 }
 
 // unitHealthy reports whether a unit is active and will stay that way.
@@ -244,10 +277,10 @@ func (c *Cursor) DisableCursorUnit(name string) error {
 	return c.disableNow(unit)
 }
 
-// DisableClaudeUnit implements ClaudeUnitDisabler for repo pruning compatibility.
-// Cursor doesn't have Claude units, so this is a no-op.
+// DisableClaudeUnit adapts the historically named pruning interface to this
+// head: stale Cursor registrations must stop their Cursor worker before removal.
 func (c *Cursor) DisableClaudeUnit(name string) error {
-	return nil
+	return c.DisableCursorUnit(name)
 }
 
 type cursorInstance struct {

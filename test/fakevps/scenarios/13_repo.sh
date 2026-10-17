@@ -276,7 +276,8 @@ test_unregistered_directory_cannot_be_managed() {
     note "could not enable the orphaned claude-remote@not-a-repo.service fixture"
   run "$CODVPS_BIN" repo add "$WORK/not-a-repo.git"
   [[ $RC -eq 1 ]] || note "repo add over a plain directory did not exit 1 (got $RC): $OUT"
-  grep -qF "not a Git checkout: $HOME/not-a-repo" <<<"$OUT" || note "repo add did not refuse the plain directory: $OUT"
+  [[ $OUT == *"failed to inspect Git directory for \"$HOME/not-a-repo\""* && $OUT == *"$HOME/not-a-repo/.git: no such file or directory"* ]] ||
+    note "repo add did not refuse the plain directory's missing Git directory: $OUT"
   ! registry_has not-a-repo || note "a plain directory was registered"
   run "$CODVPS_BIN" repo remove not-a-repo
   [[ $RC -eq 0 ]] || note "repo remove not-a-repo failed (rc=$RC): $OUT"
@@ -287,20 +288,33 @@ test_unregistered_directory_cannot_be_managed() {
   rmdir "$HOME/not-a-repo"
 }
 
-# A linked worktree forged into the registry is pruned, never managed, and
-# never deleted.
+# A linked worktree forged into the registry fails closed. Listing must leave
+# the registry and checkout intact; only explicit removal drops the bad entry.
 test_linked_worktree_is_not_a_second_repository() {
+  local before="$WORK/registry-before-worktree-list"
   run "$CODVPS_BIN" repo add "$REMOTE"
   [[ $RC -eq 0 ]] || note "re-adding $NAME failed (rc=$RC): $OUT"
   git -C "$DEST" worktree add -q -b wt13 "$HOME/remote-wt" origin/main
   [[ -f $HOME/remote-wt/.git ]] || note "git did not create a linked worktree with a .git file"
   python3 "$REGISTRY_HELPER" "$REGISTRY" add remote-wt "$HOME/remote-wt"
+  cp "$REGISTRY" "$before"
   run "$CODVPS_BIN" repo list
-  [[ $RC -eq 0 ]] || note "repo list with a forged worktree entry failed (rc=$RC): $OUT"
+  [[ $RC -ne 0 ]] || note "repo list accepted a forged linked-worktree entry: $OUT"
+  [[ $OUT == *"cannot validate registered checkout \"$HOME/remote-wt\""* && $OUT == *'linked worktree or submodule (.git is not a real directory)'* ]] ||
+    note "repo list did not identify the invalid linked-worktree entry: $OUT"
   ! list_has_row remote-wt || note "a linked worktree appeared in repo list: $OUT"
-  ! registry_has remote-wt || note "repo list did not prune the linked worktree entry"
+  cmp -s "$REGISTRY" "$before" || note "a failed linked-worktree validation changed the registry"
+  registry_has remote-wt "$HOME/remote-wt" || note "repo list silently dropped the invalid linked-worktree registration"
   ! claude_unit_enabled remote-wt || note "a linked worktree acquired a Claude unit"
   [[ -d $HOME/remote-wt ]] || note "codvps deleted a linked worktree it refused to manage"
+  run "$CODVPS_BIN" repo remove remote-wt
+  [[ $RC -eq 0 ]] || note "explicitly removing the invalid worktree entry failed (rc=$RC): $OUT"
+  ! registry_has remote-wt || note "explicit removal left the invalid worktree entry registered"
+  registry_has "$NAME" "$DEST" || note "removing the worktree entry changed its primary repository's registration"
+  [[ -f $HOME/remote-wt/.git ]] || note "deregistering the worktree deleted its checkout"
+  run "$CODVPS_BIN" repo list
+  [[ $RC -eq 0 ]] || note "repo list did not recover after removing the invalid worktree entry: $OUT"
+  list_has_row "$NAME" || note "repo list lost the primary repository after worktree deregistration: $OUT"
   git -C "$DEST" worktree remove --force "$HOME/remote-wt"
   git -C "$DEST" branch -q -D wt13
   run "$CODVPS_BIN" repo remove "$NAME"
