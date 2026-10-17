@@ -63,7 +63,16 @@ func repoAddAt(url, dest string) error {
 	if err != nil {
 		return err
 	}
-	if err := manager.AddAt(url, dest); err != nil {
+	layout, err := paths.New("")
+	if err != nil {
+		return err
+	}
+	childEnv, err := settings.Environment(layout)
+	if err != nil {
+		return err
+	}
+	cloneURL := repoCloneURL(url, runner.NewExecRunner(childEnv...))
+	if err := manager.AddAt(cloneURL, dest); err != nil {
 		return err
 	}
 	fmt.Printf("Repository added: %s\n", url)

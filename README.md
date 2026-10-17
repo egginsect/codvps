@@ -136,6 +136,13 @@ SSH keys, or changes Git author identity. `--non-interactive` only verifies
 an existing account and never writes login/helper configuration. `--defer`
 prints a read-only preflight.
 
+When `gh` is configured to use HTTPS for `github.com`, `repo add` also accepts
+conventional SSH URLs such as `git@github.com:OWNER/REPO.git` and
+`ssh://git@github.com/OWNER/REPO.git`, using HTTPS for that operation. This
+does not change Git configuration or an existing checkout's origin. If `gh`
+is unavailable or configured for SSH, the supplied URL is used unchanged;
+other hosts, custom SSH users and explicit ports are always left unchanged.
+
 Optionally reuse an isolated GitHub configuration and Git config file:
 
 ```bash
