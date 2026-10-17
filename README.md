@@ -15,12 +15,12 @@ codvps provides a command-line interface for managing remote Claude Code and Cod
 To install the current checkout (including a checked-out pull request), run:
 
 ```bash
-make install
-codvps help
+./install.sh
 ```
 
 This requires Linux, Go 1.27.1 or newer (see `go.mod`), Make, Bash and the
-standard GNU command-line utilities. It builds the current source and installs
+GNU coreutils (including `timeout`). The script finds an installed, compatible
+Go compiler automatically, builds the current source and installs
 the real `codvps` executable at `~/.local/bin/codvps`. It does not clone another
 checkout, require sudo, install provider CLIs, provision the host, start services,
 or change authentication and configuration. It uses your ordinary HOME and XDG
@@ -32,15 +32,27 @@ If `~/.local/bin` is not already on PATH, add it for this shell:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The installer prints this guidance but never edits shell startup files. For
+The installer prints the exact installed path and a command to verify it. It
+also prints PATH guidance when needed, but never edits shell startup files.
+Once the installation directory is on PATH, run `codvps help`. For
 another installation prefix or a packaging staging directory:
 
 ```bash
-make install PREFIX=/absolute/prefix
-make install PREFIX=/usr/local DESTDIR=/absolute/staging-directory
+PREFIX=/absolute/prefix ./install.sh
+PREFIX=/usr/local DESTDIR=/absolute/staging-directory ./install.sh
 ```
 
-If the Go toolchain is not on PATH, pass `GO=/absolute/path/to/go` to `make`.
+Discovery checks all absolute PATH directories, `GOROOT`, common user/system
+Go locations, and an optional companion runtime at
+`../codvps-cli-runtime/toolchain/go/bin/go` relative to the checkout. It checks
+each candidate's actual version, skips unrelated programs named `go` and older
+compilers, and does not search the filesystem recursively. An explicit `GO`
+override is also supported and must be valid. No compiler is downloaded: if no
+compatible compiler is found, install the required Go version and rerun
+`./install.sh`. Go's automatic toolchain switching is disabled for this build.
+
+`make install` remains available for development and packaging when a valid
+Go compiler is already on PATH (or selected with `GO`).
 
 The target is `PREFIX/bin/codvps`, or `DESTDIR/PREFIX/bin/codvps` when staging.
 An identical installed binary is left in place; a different regular binary is
@@ -49,6 +61,11 @@ are refused. Installing the CLI does not enable remote access; use the
 [manual-mode setup](#hosts-without-systemd-manual-mode) below where appropriate.
 
 ### Full VPS installation
+
+From a source checkout, use `./install.sh --vps` to explicitly select the
+release/VPS bootstrap instead of the source CLI installer. Existing release
+flags such as `--version` also select that bootstrap for compatibility. A
+missing compiler or incomplete source checkout never falls back to provisioning.
 
 On an Ubuntu/Debian VPS, as a sudo-capable login user (not root):
 
@@ -63,8 +80,8 @@ curl -fsSL https://github.com/egginsect/codvps/releases/latest/download/install.
   | bash -s -- --version v0.1.0 --components claude,codex --switch none
 ```
 
-`install.sh` only downloads the codvps binary for your architecture (linux
-amd64 or arm64), verifies it against the release's `SHA256SUMS` and the
+The standalone/downloaded or piped script downloads the codvps binary for your
+architecture (linux amd64 or arm64), verifies it against the release's `SHA256SUMS` and the
 version it reports, and keeps it at `~/.local/share/codvps/<version>/codvps`.
 It then shows what will change and asks before running
 `sudo codvps install`, which provisions the host (apt packages, gh, Node.js,
