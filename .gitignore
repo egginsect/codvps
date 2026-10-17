@@ -1,4 +1,5 @@
 dist/
+/codvps
 *.test
 coverage.out
 .claude/worktrees/

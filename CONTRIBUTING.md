@@ -8,6 +8,18 @@
 make build
 ```
 
+### Install only the CLI from this checkout
+
+```bash
+make install
+```
+
+Requires the Go version in `go.mod`, Make, Bash and GNU utilities on Linux.
+The default target is `~/.local/bin/codvps`; `PREFIX` and `DESTDIR` are supported.
+This does not run the privileged VPS installer or alter provider configuration.
+Installer fixtures are included in `make test` and can be run separately with
+`make test-install`.
+
 ### Run tests
 
 ```bash

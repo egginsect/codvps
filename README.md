@@ -10,6 +10,46 @@ codvps provides a command-line interface for managing remote Claude Code and Cod
 
 ## Install
 
+### CLI only, from an existing source checkout
+
+To install the current checkout (including a checked-out pull request), run:
+
+```bash
+make install
+codvps help
+```
+
+This requires Linux, Go 1.27.1 or newer (see `go.mod`), Make, Bash and the
+standard GNU command-line utilities. It builds the current source and installs
+the real `codvps` executable at `~/.local/bin/codvps`. It does not clone another
+checkout, require sudo, install provider CLIs, provision the host, start services,
+or change authentication and configuration. It uses your ordinary HOME and XDG
+directories when invoked; it does not migrate credentials from another profile.
+
+If `~/.local/bin` is not already on PATH, add it for this shell:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The installer prints this guidance but never edits shell startup files. For
+another installation prefix or a packaging staging directory:
+
+```bash
+make install PREFIX=/absolute/prefix
+make install PREFIX=/usr/local DESTDIR=/absolute/staging-directory
+```
+
+If the Go toolchain is not on PATH, pass `GO=/absolute/path/to/go` to `make`.
+
+The target is `PREFIX/bin/codvps`, or `DESTDIR/PREFIX/bin/codvps` when staging.
+An identical installed binary is left in place; a different regular binary is
+backed up before atomic replacement. Symlinked destinations and non-file targets
+are refused. Installing the CLI does not enable remote access; use the
+[manual-mode setup](#hosts-without-systemd-manual-mode) below where appropriate.
+
+### Full VPS installation
+
 On an Ubuntu/Debian VPS, as a sudo-capable login user (not root):
 
 ```bash
@@ -80,7 +120,7 @@ already provisioned.
 
 ```bash
 make build
-./codvps --help
+./codvps help
 ```
 
 ## Workspaces and native CLI sessions
