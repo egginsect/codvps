@@ -17,7 +17,7 @@
 #      anything is kept on a mismatch, a missing entry or an unexpected
 #      layout;
 #   4. keeps the verified binary under ~/.local/share/codvps/<tag>/;
-#   5. hands off to `sudo codvps install` (which provisions the host and
+#   5. hands off to `sudo codvps install --system` (which provisions the host and
 #      wires up codvps), forwarding --components and --switch. Under
 #      `curl | bash` stdin is this script, so the handoff reads the terminal
 #      from /dev/tty; with no terminal it prints the exact next command
@@ -54,7 +54,7 @@ provision a VPS or run the installed CLI. A suitable Go compiler, make,
 and GNU coreutils must already be installed; no Go toolchain is downloaded.
 
 A standalone/downloaded script, or a script piped to bash, downloads and
-verifies the release binary, then hands off to `sudo codvps install`.
+verifies the release binary, then hands off to `sudo codvps install --system`.
 In a checkout, --vps explicitly selects that same VPS bootstrap. Existing
 release options below also select the VPS bootstrap for compatibility.
 
@@ -285,7 +285,7 @@ release_main() {
 
   local staged
   staged=$(stage "$tmp/$asset" "$tag")
-  local -a handoff=("${sudo_cmd[@]}" "$staged" install "${forward[@]}")
+  local -a handoff=("${sudo_cmd[@]}" "$staged" install --system "${forward[@]}")
 
   cat >&2 <<EOF
 

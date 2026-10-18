@@ -163,7 +163,7 @@ run_install pipe --components claude,codex --switch none
 staged="$STAGE_ROOT/v0.1.0/codvps"
 grep -q 'fixture codvps v0.1.0 linux/amd64' "$staged" || fail "did not keep the amd64 v0.1.0 binary"
 [[ $OUT == *"No terminal is available, so nothing more was run. To finish, run:"* ]] || fail "no non-TTY notice: $OUT"
-[[ $OUT == *"  sudo $staged install --components claude,codex --switch none"* ]] || fail "exact next command not printed: $OUT"
+[[ $OUT == *"  sudo $staged install --system --components claude,codex --switch none"* ]] || fail "exact next command not printed: $OUT"
 grep -q "^curl .*$BASE/latest\$" "$LOG" || fail "latest was not resolved"
 grep -q "^curl .*$BASE/download/v0.1.0/SHA256SUMS\$" "$LOG" || fail "SHA256SUMS not fetched for the resolved tag"
 only_called curl
@@ -241,8 +241,8 @@ CURRENT='TTY handoff forwards components and switch'
 printf 'y\n' >"$WORK/tty-yes"
 FAKE_SUDO=1 TTY_PATH="$WORK/tty-yes" run_install pipe --components codex --switch=none
 [[ $RC -eq 0 ]] || fail "rc=$RC: $OUT"
-grep -Fxq "sudo $STAGE_ROOT/v0.1.0/codvps install --components codex --switch=none" "$LOG" || fail "handoff not run through sudo: $(cat "$LOG")"
-grep -Fxq 'fixture-codvps install --components codex --switch=none' "$LOG" || fail "components/switch not forwarded: $(cat "$LOG")"
+grep -Fxq "sudo $STAGE_ROOT/v0.1.0/codvps install --system --components codex --switch=none" "$LOG" || fail "handoff not run through sudo: $(cat "$LOG")"
+grep -Fxq 'fixture-codvps install --system --components codex --switch=none' "$LOG" || fail "components/switch not forwarded: $(cat "$LOG")"
 [[ $OUT == *'codvps login github'* ]] || fail "login github not suggested: $OUT"
 plan=${OUT%%Run *}
 [[ $plan == *'provision the host for the selected components'* ]] || fail "the plan was not shown before the prompt: $OUT"
@@ -258,7 +258,7 @@ CURRENT='TTY handoff with --yes'
 : >"$WORK/tty-empty"
 FAKE_SUDO=1 TTY_PATH="$WORK/tty-empty" run_install pipe --components claude --yes
 [[ $RC -eq 0 ]] || fail "rc=$RC: $OUT"
-grep -Fxq 'fixture-codvps install --components claude' "$LOG" || fail "--yes did not hand off: $(cat "$LOG")"
+grep -Fxq 'fixture-codvps install --system --components claude' "$LOG" || fail "--yes did not hand off: $(cat "$LOG")"
 
 CURRENT='inspect first: download, read, run from a file'
 run_install file --help
@@ -266,7 +266,7 @@ run_install file --help
 [[ ! -s $LOG ]] || fail "--help touched the network: $(cat "$LOG")"
 run_install file --version 0.1.0 --components claude
 [[ $RC -eq 0 ]] || fail "rc=$RC: $OUT"
-[[ $OUT == *"  sudo $STAGE_ROOT/v0.1.0/codvps install --components claude"* ]] || fail "exact next command not printed: $OUT"
+[[ $OUT == *"  sudo $STAGE_ROOT/v0.1.0/codvps install --system --components claude"* ]] || fail "exact next command not printed: $OUT"
 ! grep -q '/latest' "$LOG" || fail "an explicit version resolved latest"
 
 CURRENT='truncated download runs nothing'

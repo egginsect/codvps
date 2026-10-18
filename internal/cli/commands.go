@@ -46,7 +46,7 @@ type repoCmd struct{}
 
 func (c *repoCmd) Execute(args []string) error {
 	if len(args) == 0 {
-		return invalidUsage("codvps repo <add|list|remove>")
+		return invalidUsage("codvps repo <add|add-local|list|remove>")
 	}
 
 	sub := args[0]
@@ -57,6 +57,11 @@ func (c *repoCmd) Execute(args []string) error {
 		}
 		fmt.Print(repoUsage)
 		return nil
+	case "add-local":
+		if len(args) != 2 {
+			return invalidUsage("codvps repo add-local <absolute-path>")
+		}
+		return repoAddLocal(args[1])
 	case "add":
 		for _, a := range args[1:] {
 			if a == "--head" || a == "--trusted" {
@@ -88,6 +93,7 @@ func (c *repoCmd) Execute(args []string) error {
 const repoUsage = `Usage: codvps repo <command>
 
 Repository commands:
+  add-local <absolute-path>  Register an existing GitHub checkout offline; never clone or start heads
   add <url> [--dest <absolute-path>]  Clone or safely reattach a repository and attach it to every enabled head
   list               List registered repositories and their Claude head state
   remove <name>      Deregister a repository and detach it from every head; keep the checkout

@@ -262,7 +262,11 @@ func TestInstallAndUninstallRequireRoot(t *testing.T) {
 		t.Skip("must not run install or uninstall as root in tests")
 	}
 	for _, cmd := range []string{"install", "uninstall"} {
-		err := Execute([]string{cmd})
+		args := []string{cmd}
+		if cmd == "install" {
+			args = append(args, "--system")
+		}
+		err := Execute(args)
 		if err == nil || !strings.Contains(err.Error(), "must be run as root") {
 			t.Errorf("%s as non-root: got %v", cmd, err)
 		}
@@ -305,3 +309,18 @@ func TestComponentsList(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) { unstubbedRuntimeCommand(t, "update") }
+
+func TestInstallDefaultsUserOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if os.Geteuid() == 0 {
+		t.Skip("user install refuses root")
+	}
+	if err := Execute([]string{"install", "--dry-run"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"install", "--skip-provision"}, {"install", "--switch", "none"}, {"install", "--user", "--system"}, {"install", "--components", "--system"}, {"install", "--user", "--user"}, {"install", "--system", "--system"}} {
+		if err := Execute(args); err == nil {
+			t.Fatalf("accepted unsafe flag combination %v", args)
+		}
+	}
+}

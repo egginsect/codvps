@@ -76,7 +76,7 @@ func (h *host) retireLegacyRuntimes() error {
 		// it spawns from its own path would fail.
 		if n := h.runningFrom(tree); n > 0 {
 			found = true
-			h.Warnf("kept %s: %d running process(es) still execute from it; restart those heads, then rerun sudo codvps install", tree, n)
+			h.Warnf("kept %s: %d running process(es) still execute from it; restart those heads, then rerun sudo codvps install --system", tree, n)
 			continue
 		}
 		removed, err := removeRealDir(tree)

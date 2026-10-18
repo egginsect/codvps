@@ -230,7 +230,7 @@ func (u *uninstaller) printLeftInPlace() {
 	fmt.Fprintf(&b, "  - %s (the component selection)\n", filepath.Join("/etc", u.layout.Namespace(), components.RegistryFileName))
 	fmt.Fprintf(&b, "  - packages, node, gh and the vendor CLIs the bootstrap installer provisioned\n")
 	fmt.Fprintf(&b, "  - the loginctl linger enabled for %s\n", u.op.Name)
-	fmt.Fprintf(&b, "\nTo reinstall: sudo codvps install (from a codvps binary), or rerun the codvps installer.\n")
+	fmt.Fprintf(&b, "\nTo reinstall: sudo codvps install --system (from a codvps binary), or rerun the codvps installer.\n")
 	for _, p := range u.installed() {
 		if p.Install.UninstallNote != "" {
 			fmt.Fprintf(&b, "\n%s", p.Install.UninstallNote)

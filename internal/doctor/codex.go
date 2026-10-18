@@ -111,7 +111,7 @@ func (d *Check) checkCodexInstall(st *codexState) {
 	if d.codexUnitIsCurrent() {
 		d.Pass("installed Codex unit runs the official daemon lifecycle")
 	} else {
-		d.Fail("installed Codex unit is missing or is not the current one; run sudo codvps install")
+		d.Fail("installed Codex unit is missing or is not the current one; run sudo codvps install --system")
 	}
 }
 

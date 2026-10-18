@@ -278,8 +278,8 @@ func TestEnsureGH_SudoPasswordWithoutTTY_ClearError(t *testing.T) {
 	_, ctx := installCtx(t, r)
 
 	err := ensureGH(ctx)
-	if err == nil || !strings.Contains(err.Error(), "run sudo codvps install (installs the current gh)") {
-		t.Fatalf("err = %v, want the sudo codvps install hint", err)
+	if err == nil || !strings.Contains(err.Error(), "run sudo codvps install --system (installs the current gh)") {
+		t.Fatalf("err = %v, want the sudo codvps install --system hint", err)
 	}
 	if r.ran("apt-get") {
 		t.Errorf("apt ran without root: %v", r.lines)

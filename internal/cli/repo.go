@@ -125,3 +125,22 @@ func parseRepoAdd(args []string) (string, string, error) {
 	}
 	return args[0], args[2], nil
 }
+
+// repoAddLocal intentionally bypasses head discovery and gh transport probing.
+// Offline registration never enables/reconciles a running provider head.
+func repoAddLocal(dest string) error {
+	layout, err := paths.New("")
+	if err != nil {
+		return err
+	}
+	env, err := settings.Environment(layout)
+	if err != nil {
+		return err
+	}
+	manager := repo.NewRepoManager(layout, runner.NewExecRunner(append(env, "GIT_TERMINAL_PROMPT=0")...), nil)
+	if err := manager.AddLocal(dest); err != nil {
+		return err
+	}
+	fmt.Printf("Local repository registered: %s\nNo remote access was checked and no provider heads were started.\n", dest)
+	return nil
+}
