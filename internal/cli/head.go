@@ -13,6 +13,7 @@ import (
 	"github.com/egginsect/codvps/internal/paths"
 	"github.com/egginsect/codvps/internal/providers"
 	"github.com/egginsect/codvps/internal/runner"
+	"github.com/egginsect/codvps/internal/settings"
 )
 
 // headEnv is the production object graph shared by the head, repo,
@@ -54,9 +55,13 @@ func newHeadEnv() (*headEnv, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize paths: %w", err)
 	}
+	childEnv, err := settings.Environment(layout)
+	if err != nil {
+		return nil, err
+	}
 	return buildHeadEnv(headDeps{
 		layout:    layout,
-		git:       runner.NewExecRunner("GIT_TERMINAL_PROMPT=0"),
+		git:       runner.NewExecRunner(append(childEnv, "GIT_TERMINAL_PROMPT=0")...),
 		system:    runner.NewExecRunner(),
 		exec:      func(env ...string) runner.Runner { return runner.NewExecRunner(env...) },
 		operator:  currentOperator(),
@@ -130,6 +135,9 @@ func (e *headEnv) headSetEnabled(name string, enable bool) error {
 }
 
 func runHeadSetEnabled(provider string, enable bool) error {
+	if err := requireSystemdMode(); err != nil {
+		return err
+	}
 	env, err := newHeadEnv()
 	if err != nil {
 		return err
@@ -145,6 +153,9 @@ func runHeadSetEnabled(provider string, enable bool) error {
 }
 
 func runHeadList() error {
+	if manual, err := manualStatus(); manual || err != nil {
+		return err
+	}
 	env, err := newHeadEnv()
 	if err != nil {
 		return err
@@ -155,6 +166,9 @@ func runHeadList() error {
 // runHeadAction runs a head's optional action (pair, ensure) for the
 // provider called name.
 func runHeadAction(name string, action func(*providers.Head) func(*head.Heads) error) error {
+	if err := requireSystemdMode(); err != nil {
+		return err
+	}
 	env, err := newHeadEnv()
 	if err != nil {
 		return err
@@ -194,6 +208,9 @@ func isExecutableFile(path string) bool {
 }
 
 func runStatus() error {
+	if manual, err := manualStatus(); manual || err != nil {
+		return err
+	}
 	env, err := newHeadEnv()
 	if err != nil {
 		return err

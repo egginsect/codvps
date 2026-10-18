@@ -13,6 +13,7 @@ import (
 	"github.com/egginsect/codvps/internal/configlink"
 	"github.com/egginsect/codvps/internal/paths"
 	"github.com/egginsect/codvps/internal/registry"
+	"github.com/egginsect/codvps/internal/repo"
 )
 
 // loginCmd handles 'login' command
@@ -62,13 +63,11 @@ func (c *repoCmd) Execute(args []string) error {
 				return fmt.Errorf("repo add no longer accepts --head or --trusted; heads are host-scoped, so use codvps enable <claude|codex> separately")
 			}
 		}
-		if len(args) != 2 {
-			return invalidUsage("codvps repo add <url>")
+		url, dest, err := parseRepoAdd(args[1:])
+		if err != nil {
+			return err
 		}
-		if strings.HasPrefix(args[1], "-") {
-			return fmt.Errorf("unknown repo add option: %s", args[1])
-		}
-		return repoAdd(args[1])
+		return repoAddAt(url, dest)
 	case "list":
 		if len(args) != 1 {
 			return invalidUsage("codvps repo list")
@@ -89,12 +88,13 @@ func (c *repoCmd) Execute(args []string) error {
 const repoUsage = `Usage: codvps repo <command>
 
 Repository commands:
-  add <url>          Clone or safely reattach a repository and attach it to every enabled head
+  add <url> [--dest <absolute-path>]  Clone or safely reattach a repository and attach it to every enabled head
   list               List registered repositories and their Claude head state
   remove <name>      Deregister a repository and detach it from every head; keep the checkout
 
 Heads are host-scoped, not per repository: codvps enable|disable <claude|codex|cursor>.
 Every registered repository is attached to every enabled head.
+New repositories default to repo_root (or HOME); registered paths never move.
 `
 
 // enableCmd handles 'enable' command (top-level, was 'head enable')
@@ -307,6 +307,9 @@ func (c *updateCmd) Execute(args []string) error {
 type configCmd struct{}
 
 func (c *configCmd) Execute(args []string) error {
+	if len(args) > 0 && (args[0] == "get" || args[0] == "set" || args[0] == "unset") {
+		return configSetting(args)
+	}
 	switch {
 	case len(args) == 2 && args[0] == "link":
 		return runConfigLink(args[1])
@@ -341,7 +344,10 @@ func runConfigLink(arg string) error {
 	if err != nil {
 		return err
 	}
-	checkout := filepath.Join(layout.Home(), name)
+	checkout, err := repo.CheckoutPath(layout, name)
+	if err != nil {
+		return fmt.Errorf("%s is not a registered repository; run codvps config link <repo-url>: %w", name, err)
+	}
 	if fi, err := os.Stat(checkout); err != nil || !fi.IsDir() || !slices.Contains(names, name) {
 		return fmt.Errorf("%s is not a registered repository; run codvps config link <repo-url>", name)
 	}
@@ -351,7 +357,7 @@ func runConfigLink(arg string) error {
 	}
 	home := layout.Home()
 	short := func(p string) string {
-		if rel, err := filepath.Rel(home, p); err == nil {
+		if rel, err := filepath.Rel(home, p); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return "~/" + rel
 		}
 		return p

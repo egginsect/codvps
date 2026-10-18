@@ -216,7 +216,7 @@ func TestComponentsStatusValid(t *testing.T) {
 func TestRepoHelpAndUnknownSubcommands(t *testing.T) {
 	for _, line := range []string{
 		"Usage: codvps repo <command>",
-		"  add <url>          Clone or safely reattach a repository and attach it to every enabled head",
+		"  add <url> [--dest <absolute-path>]  Clone or safely reattach a repository and attach it to every enabled head",
 		"Heads are host-scoped, not per repository: codvps enable|disable <claude|codex|cursor>.",
 		"Every registered repository is attached to every enabled head.",
 	} {

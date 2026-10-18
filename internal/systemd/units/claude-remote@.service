@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Slice=claude-remote.slice
-WorkingDirectory=%h/%i
-ExecStart=/usr/local/bin/codvps internal shell-exec --provider claude -- claude remote-control --spawn worktree --capacity 4 --no-create-session-in-dir --remote-control-session-name-prefix cloud-%i
+WorkingDirectory=%h
+ExecStart=/usr/local/bin/codvps internal shell-exec --provider claude --repo %i -- claude remote-control --spawn worktree --capacity 4 --no-create-session-in-dir --remote-control-session-name-prefix cloud-%i
 Restart=always
 RestartSec=5
 UnsetEnvironment=ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_BASE_URL

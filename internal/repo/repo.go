@@ -2,7 +2,7 @@
 // (add/list/remove).
 //
 // The registry file is the sole authority for which checkouts codvps
-// manages: a directory under $HOME that merely looks like a managed
+// manages: a directory that merely looks like a managed
 // checkout (a stray clone, a temp directory Codex itself created) is
 // invisible to every operation here unless its name is present in the
 // registry.
@@ -20,6 +20,7 @@ import (
 	"github.com/egginsect/codvps/internal/paths"
 	"github.com/egginsect/codvps/internal/registry"
 	"github.com/egginsect/codvps/internal/runner"
+	"github.com/egginsect/codvps/internal/settings"
 )
 
 // RepoManager manages repository registration and lifecycle.
@@ -65,25 +66,64 @@ func (d detachEvery) DisableClaudeUnit(name string) error {
 // error, but the checkout and its registration are not undone: past
 // registration, a head problem is not a bad add.
 func (rm *RepoManager) Add(url string) error {
+	return rm.AddAt(url, "")
+}
+
+// AddAt clones or reattaches a repository at an absolute checkout path.
+// An omitted destination uses the persisted path for an existing registration,
+// or the configured repository root for a new one. Registrations never move.
+func (rm *RepoManager) AddAt(url, dest string) error {
 	name, err := registry.RepoNameFromURL(url)
 	if err != nil {
 		return fmt.Errorf("invalid repository URL: %w", err)
 	}
-	dest := filepath.Join(rm.layout.Home(), name)
-
-	symlinked, err := hasSymlinkAncestor(rm.layout.Home(), dest)
-	if err != nil {
-		return fmt.Errorf("failed to inspect repository path %q: %w", dest, err)
+	registryPath := rm.layout.RepositoriesPath()
+	// Establish the stable transaction lock before the potentially long clone,
+	// but never hold it while running clone or reconciling provider heads.
+	var entries []registry.Entry
+	if err := registry.UpdateEntries(registryPath, func(current []registry.Entry) ([]registry.Entry, error) {
+		entries = append([]registry.Entry(nil), current...)
+		return current, nil
+	}); err != nil {
+		return fmt.Errorf("failed to read registry: %w", err)
 	}
-	if symlinked {
-		return fmt.Errorf("repository path %q has a symlinked component and cannot be managed", dest)
+	registered := false
+	var originalEntry registry.Entry
+	for _, entry := range entries {
+		if entry.Name != name {
+			continue
+		}
+		registered = true
+		originalEntry = entry
+		stored := entryPath(rm.layout, entry)
+		if dest != "" && dest != stored {
+			return fmt.Errorf("repository %q is already registered at %q; refusing to move or remap it to %q", name, stored, dest)
+		}
+		dest = stored
+		break
+	}
+	if dest == "" {
+		root, err := settings.RepositoryRoot(rm.layout)
+		if err != nil {
+			return err
+		}
+		dest = filepath.Join(root, name)
+	}
+	if err := validateCheckoutPath(dest); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name != name && entryPath(rm.layout, entry) == dest {
+			return fmt.Errorf("checkout path %q is already registered as %q", dest, entry.Name)
+		}
+	}
+	if err := rejectSymlinkPath(dest); err != nil {
+		return err
 	}
 
 	fi, statErr := os.Lstat(dest)
 	existed := statErr == nil
 	switch {
-	case existed && fi.Mode()&os.ModeSymlink != 0:
-		return fmt.Errorf("repository path %q is a symlink, which is not allowed", dest)
 	case existed && !fi.IsDir():
 		return fmt.Errorf("repository path %q exists and is not a directory", dest)
 	case existed:
@@ -93,25 +133,77 @@ func (rm *RepoManager) Add(url string) error {
 	case !os.IsNotExist(statErr):
 		return fmt.Errorf("failed to inspect repository path %q: %w", dest, statErr)
 	default:
-		if err := os.MkdirAll(rm.layout.Home(), 0o700); err != nil {
-			return fmt.Errorf("failed to prepare %q: %w", rm.layout.Home(), err)
+		// A registered checkout's missing parent can be an unavailable mount.
+		// Do not recreate it and accidentally clone onto the wrong filesystem.
+		if registered {
+			if err := requireCheckoutParent(dest); err != nil {
+				return err
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+			return fmt.Errorf("failed to prepare checkout parent %q: %w", filepath.Dir(dest), err)
+		}
+		if err := rejectSymlinkPath(dest); err != nil {
+			return err
 		}
 		if _, stderr, code, runErr := rm.git.Run("git", "clone", "--", url, dest); runErr != nil || code != 0 {
 			return fmt.Errorf("failed to clone repository: %s", strings.TrimSpace(stderr))
 		}
+		if err := IsPrimaryGitCheckout(rm.git, dest); err != nil {
+			return fmt.Errorf("new checkout failed validation: %w", err)
+		}
+		fi, err = os.Lstat(dest)
+		if err != nil {
+			return fmt.Errorf("failed to inspect new checkout: %w", err)
+		}
 	}
 
-	registryPath := rm.layout.RepositoriesPath()
-	names, err := readNamesBounded(registryPath)
+	err = registry.UpdateEntries(registryPath, func(current []registry.Entry) ([]registry.Entry, error) {
+		found := false
+		for _, entry := range current {
+			path := entryPath(rm.layout, entry)
+			if entry.Name == name {
+				if path != dest || registered && entry != originalEntry {
+					return nil, fmt.Errorf("repository %q changed during add; refusing to remap it; retry", name)
+				}
+				found = true
+			} else if path == dest {
+				return nil, fmt.Errorf("checkout path %q was concurrently registered as %q; retry", dest, entry.Name)
+			}
+		}
+		if registered && !found {
+			return nil, fmt.Errorf("repository %q was removed during add; refusing to restore it; retry", name)
+		}
+		if err := rejectSymlinkPath(dest); err != nil {
+			return nil, err
+		}
+		currentInfo, err := os.Lstat(dest)
+		if err != nil {
+			return nil, fmt.Errorf("failed to reinspect checkout %q during add: %w", dest, err)
+		}
+		if !os.SameFile(fi, currentInfo) {
+			return nil, fmt.Errorf("checkout %q changed during add; retry", dest)
+		}
+		if found {
+			return current, nil
+		}
+		return append(current, registry.Entry{Name: name, Path: dest}), nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to read registry: %w", err)
-	}
-	if !containsString(names, name) {
-		names = append(names, name)
-	}
-	if err := registry.Write(registryPath, names); err != nil {
 		if !existed {
-			rm.rollbackClone(dest, name)
+			// Check current ownership while holding the same lock: a different
+			// add may have registered the checkout after our snapshot. A failed
+			// atomic write may also have committed its rename before sync failed.
+			// When lock/read verification fails, retain the checkout.
+			_ = registry.UpdateEntries(registryPath, func(current []registry.Entry) ([]registry.Entry, error) {
+				for _, entry := range current {
+					if entryPath(rm.layout, entry) == dest {
+						return current, nil
+					}
+				}
+				rm.rollbackClone(dest, name, fi)
+				return current, nil
+			})
 		}
 		return fmt.Errorf("failed to update registry: %w", err)
 	}
@@ -136,7 +228,11 @@ func (rm *RepoManager) List() ([]RepoInfo, error) {
 	}
 	infos := make([]RepoInfo, 0, len(names))
 	for _, name := range names {
-		infos = append(infos, RepoInfo{Name: name, Path: filepath.Join(rm.layout.Home(), name)})
+		dest, err := CheckoutPath(rm.layout, name)
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, RepoInfo{Name: name, Path: dest})
 	}
 	for _, h := range rm.heads {
 		if h.Column() == "" {
@@ -243,24 +339,43 @@ func (rm *RepoManager) Remove(name string) (RemoveResult, error) {
 			held = append(held, note)
 		}
 	}
+	registryPath := rm.layout.RepositoriesPath()
+	var originalEntry registry.Entry
+	registered := false
+	snapshotErr := registry.UpdateEntries(registryPath, func(current []registry.Entry) ([]registry.Entry, error) {
+		for _, entry := range current {
+			if entry.Name == name {
+				originalEntry, registered = entry, true
+				break
+			}
+		}
+		return current, nil
+	})
+	// Even a corrupt/unreadable registry or unsafe lock must not prevent
+	// detaching the explicitly requested name. Preserve the snapshot error
+	// until those revocations have run, and never write after a failed read.
 	for _, h := range rm.heads {
 		if err := h.Detach(name); err != nil {
 			return result, fmt.Errorf("failed to disable %s head for %q: %w", h.Label(), name, err)
 		}
 	}
+	if snapshotErr != nil {
+		return result, fmt.Errorf("failed to read registry: %w", snapshotErr)
+	}
 
-	registryPath := rm.layout.RepositoriesPath()
-	names, err := readNamesBounded(registryPath)
-	if err != nil {
-		return result, fmt.Errorf("failed to read registry: %w", err)
-	}
-	filtered := make([]string, 0, len(names))
-	for _, n := range names {
-		if n != name {
-			filtered = append(filtered, n)
+	if err := registry.UpdateEntries(registryPath, func(current []registry.Entry) ([]registry.Entry, error) {
+		filtered := make([]registry.Entry, 0, len(current))
+		for _, entry := range current {
+			if entry.Name == name {
+				if !registered || entry != originalEntry {
+					return nil, fmt.Errorf("repository %q changed during removal; refusing to remove its new registration; retry", name)
+				}
+				continue
+			}
+			filtered = append(filtered, entry)
 		}
-	}
-	if err := registry.Write(registryPath, filtered); err != nil {
+		return filtered, nil
+	}); err != nil {
 		if len(held) > 0 {
 			return result, fmt.Errorf("failed to update registry; %s: %w", strings.Join(held, "; "), err)
 		}
@@ -282,32 +397,39 @@ type RemoveResult struct {
 	Notices []string
 }
 
-// PruneVanishedCheckouts reads the registry and drops any entry whose
-// checkout is no longer a primary Git repository under home, disabling
-// that repository's Claude head unit first (the same order repo remove
-// uses) and rewriting the registry. It fails closed -- without pruning
-// anything -- if the registry itself contains an invalid or duplicate
-// name: that is a corrupt-registry condition, not a vanished checkout. sortCaseInsensitive selects the
-// case-insensitive ordering `repo list` depends on.
+// PruneVanishedCheckouts drops only checkouts proven missing while their
+// parent directories remain available. Invalid checkouts, permission/I/O
+// failures, unavailable roots and corrupt registries fail closed before any
+// detach or rewrite. Retained registrations preserve their explicit paths.
+// sortCaseInsensitive selects the ordering that repo list depends on.
 func PruneVanishedCheckouts(layout *paths.Layout, git runner.Runner, reconciler ClaudeUnitDisabler, sortCaseInsensitive bool) ([]string, error) {
 	registryPath := layout.RepositoriesPath()
-	names, err := readNamesBounded(registryPath)
+	entries, err := registry.ReadEntries(registryPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read registry: %w", err)
 	}
 
-	if err := checkRegistryIntegrity(names); err != nil {
-		return nil, err
-	}
-
 	var valid, stale []string
-	for _, name := range names {
-		dest := filepath.Join(layout.Home(), name)
-		if isPrimaryGitCheckout(git, dest) == nil {
-			valid = append(valid, name)
-		} else {
-			stale = append(stale, name)
+	for _, entry := range entries {
+		dest := entryPath(layout, entry)
+		if err := rejectSymlinkPath(dest); err != nil {
+			return nil, err
 		}
+		if err := requireCheckoutParent(dest); err != nil {
+			return nil, err
+		}
+		if _, err := os.Lstat(dest); os.IsNotExist(err) {
+			stale = append(stale, entry.Name)
+			continue
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to inspect registered checkout %q: %w", dest, err)
+		}
+		if err := IsPrimaryGitCheckout(git, dest); err != nil {
+			// Invalid, inaccessible and temporarily unavailable checkouts are
+			// not proof of deletion. Keep every registration unchanged.
+			return nil, fmt.Errorf("cannot validate registered checkout %q: %w", dest, err)
+		}
+		valid = append(valid, entry.Name)
 	}
 
 	for _, name := range stale {
@@ -316,7 +438,35 @@ func PruneVanishedCheckouts(layout *paths.Layout, git runner.Runner, reconciler 
 		}
 	}
 	if len(stale) > 0 {
-		if err := registry.Write(registryPath, valid); err != nil {
+		if err := registry.UpdateEntries(registryPath, func(current []registry.Entry) ([]registry.Entry, error) {
+			// The head detach happened without the registry lock. If another
+			// operation changed registration, leave all its changes intact and
+			// make the caller retry against a fresh snapshot.
+			if !sameRegistryEntries(entries, current) {
+				return nil, fmt.Errorf("repository registry changed during pruning; retry")
+			}
+			retained := make([]registry.Entry, 0, len(current))
+			for _, entry := range current {
+				if !containsString(stale, entry.Name) {
+					retained = append(retained, entry)
+					continue
+				}
+				dest := entryPath(layout, entry)
+				if err := rejectSymlinkPath(dest); err != nil {
+					return nil, err
+				}
+				if err := requireCheckoutParent(dest); err != nil {
+					return nil, err
+				}
+				if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+					if err != nil {
+						return nil, fmt.Errorf("failed to inspect checkout %q while pruning: %w", dest, err)
+					}
+					return nil, fmt.Errorf("checkout %q reappeared during pruning; keeping registration; retry", dest)
+				}
+			}
+			return retained, nil
+		}); err != nil {
 			return nil, fmt.Errorf("failed to prune registry: %w", err)
 		}
 	}
@@ -328,24 +478,6 @@ func PruneVanishedCheckouts(layout *paths.Layout, git runner.Runner, reconciler 
 		})
 	}
 	return valid, nil
-}
-
-// checkRegistryIntegrity fails closed if names contains an invalid or
-// duplicate entry: a corrupt registry must not be silently cleaned up.
-func checkRegistryIntegrity(names []string) error {
-	for _, name := range names {
-		if err := registry.ValidateName(name); err != nil {
-			return fmt.Errorf("invalid repository name in registry: %q", name)
-		}
-	}
-	sorted := append([]string{}, names...)
-	sort.Strings(sorted)
-	for i := 1; i < len(sorted); i++ {
-		if sorted[i] == sorted[i-1] {
-			return fmt.Errorf("duplicate repository in registry: %q", sorted[i])
-		}
-	}
-	return nil
 }
 
 // isPrimaryGitCheckout accepts only a primary checkout: dest must be a real
@@ -362,14 +494,20 @@ func isPrimaryGitCheckout(git runner.Runner, dest string) error {
 // with doctor and the install-time legacy membership migration so every
 // caller applies the same "primary checkout only" rule.
 func IsPrimaryGitCheckout(git runner.Runner, dest string) error {
+	if err := rejectSymlinkPath(dest); err != nil {
+		return err
+	}
 	fi, err := os.Lstat(dest)
-	if err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+	if err != nil {
+		return fmt.Errorf("failed to inspect checkout %q: %w", dest, err)
+	}
+	if !fi.IsDir() {
 		return fmt.Errorf("not a real directory: %s", dest)
 	}
 	gitPath := filepath.Join(dest, ".git")
 	gitFi, err := os.Lstat(gitPath)
 	if err != nil {
-		return fmt.Errorf("not a Git checkout: %s", dest)
+		return fmt.Errorf("failed to inspect Git directory for %q: %w", dest, err)
 	}
 	if gitFi.Mode()&os.ModeSymlink != 0 || !gitFi.IsDir() {
 		return fmt.Errorf("repository %q is a linked worktree or submodule (.git is not a real directory)", dest)
@@ -381,11 +519,11 @@ func IsPrimaryGitCheckout(git runner.Runner, dest string) error {
 	commonDir := strings.TrimSpace(out)
 	resolvedCommon, cErr := filepath.EvalSymlinks(commonDir)
 	if cErr != nil {
-		resolvedCommon = commonDir
+		return fmt.Errorf("failed to resolve git-common-dir for %q: %w", dest, cErr)
 	}
 	resolvedGitDir, gErr := filepath.EvalSymlinks(gitPath)
 	if gErr != nil {
-		resolvedGitDir = gitPath
+		return fmt.Errorf("failed to resolve Git directory for %q: %w", dest, gErr)
 	}
 	if resolvedCommon != resolvedGitDir {
 		return fmt.Errorf("repository %q is a linked worktree (git-common-dir does not match .git)", dest)
@@ -429,12 +567,12 @@ func validateExistingCheckoutForURL(git runner.Runner, dest, url string) error {
 // still exactly the pristine checkout at the expected path: a dirty tree,
 // an unexpected path, or a symlink means something else already touched
 // it, so it is retained rather than destroyed.
-func (rm *RepoManager) rollbackClone(dest, name string) {
-	if dest != filepath.Join(rm.layout.Home(), name) {
+func (rm *RepoManager) rollbackClone(dest, name string, original os.FileInfo) {
+	if registry.ValidateName(name) != nil || validateCheckoutPath(dest) != nil || rejectSymlinkPath(dest) != nil {
 		return
 	}
 	fi, err := os.Lstat(dest)
-	if err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+	if err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() || original == nil || !os.SameFile(original, fi) {
 		return
 	}
 	top, _, code, err := rm.git.Run("git", "-C", dest, "rev-parse", "--show-toplevel")
@@ -451,45 +589,6 @@ func (rm *RepoManager) rollbackClone(dest, name string) {
 		return
 	}
 	_ = os.RemoveAll(dest)
-}
-
-// hasSymlinkAncestor reports whether root itself, or any path component
-// between root and target, is a symlink.
-func hasSymlinkAncestor(root, target string) (bool, error) {
-	if fi, err := os.Lstat(root); err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return true, nil
-		}
-	} else if !os.IsNotExist(err) {
-		return false, err
-	}
-
-	rel, err := filepath.Rel(root, target)
-	if err != nil {
-		return false, err
-	}
-	if rel == "." || rel == "" {
-		return false, nil
-	}
-
-	cur := root
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		if part == "" || part == "." {
-			continue
-		}
-		cur = filepath.Join(cur, part)
-		fi, err := os.Lstat(cur)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return false, nil
-			}
-			return false, err
-		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // stateSafetyOK reports whether the codvps state directory and repository
@@ -537,4 +636,21 @@ func containsString(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// sameRegistryEntries compares complete records, independent of storage order.
+func sameRegistryEntries(a, b []registry.Entry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	byName := make(map[string]registry.Entry, len(a))
+	for _, entry := range a {
+		byName[entry.Name] = entry
+	}
+	for _, entry := range b {
+		if old, ok := byName[entry.Name]; !ok || old != entry {
+			return false
+		}
+	}
+	return true
 }

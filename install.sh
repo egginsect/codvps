@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# codvps bootstrap installer.
+# codvps source CLI installer and standalone release bootstrap.
+#
+# In a source checkout, ./install.sh builds and installs only the CLI.
+# Use --vps to explicitly select the release bootstrap described below.
 #
 #   curl -fsSL https://github.com/egginsect/codvps/releases/latest/download/install.sh | bash
 #   curl -fsSL .../install.sh | bash -s -- --version v0.1.0 --components claude,codex --switch none
 #
-# This script only fetches and verifies the codvps binary; it never touches
-# the host itself. It:
+# The release bootstrap fetches and verifies the codvps binary before its
+# explicit VPS handoff. It:
 #   1. detects the platform (linux amd64 or arm64; anything else is refused);
 #   2. resolves the release selector once to an exact tag (--version is
 #      exact and never falls back to the latest release);
@@ -26,6 +29,8 @@
 
 set -euo pipefail
 
+# Capture at top level: Bash labels stdin-defined functions as source "main".
+readonly CODVPS_SCRIPT_SOURCE=${BASH_SOURCE[0]:-}
 readonly CODVPS_DEFAULT_RELEASES_URL=https://github.com/egginsect/codvps/releases
 
 say() {
@@ -39,24 +44,79 @@ die() {
 
 usage() {
   cat <<'EOF'
-usage: install.sh [--version vX.Y.Z] [--components claude,codex|none]
+usage: install.sh
+       install.sh --vps [--version vX.Y.Z] [--components claude,codex|none]
                   [--switch none] [--yes]
 
-Downloads and verifies the codvps release binary for this machine, then
-hands off to `sudo codvps install`.
+In a source checkout, running ./install.sh with no arguments builds and
+installs only the CLI to ${PREFIX:-$HOME/.local}/bin/codvps. It does not
+provision a VPS or run the installed CLI. A suitable Go compiler, make,
+and GNU coreutils must already be installed; no Go toolchain is downloaded.
 
+A standalone/downloaded script, or a script piped to bash, downloads and
+verifies the release binary, then hands off to `sudo codvps install`.
+In a checkout, --vps explicitly selects that same VPS bootstrap. Existing
+release options below also select the VPS bootstrap for compatibility.
+
+  --vps                explicitly use the release/VPS bootstrap
   --version <tag>       exact release to install (default: the latest
                         release, resolved once to its tag)
   --components <list>   forwarded to `codvps install`
   --switch <name>       forwarded to `codvps install`
-  --yes                 do not ask for confirmation before the handoff
-  -h, --help            show this help
+  --yes, -y            do not ask for confirmation before the handoff
+  -h, --help           show this help
 
-Environment:
-  CODVPS_VERSION        same as --version
+Source installation environment:
+  GO                   explicit Go compiler path or command (must be valid)
+  PREFIX               installation prefix (default: $HOME/.local)
+  DESTDIR              optional staging root, prepended to PREFIX
+  GOROOT               additional Go compiler discovery root
+
+Release bootstrap environment:
+  CODVPS_VERSION        same as --version for the release bootstrap
   CODVPS_RELEASES_URL   HTTPS base of the releases
                         (default: https://github.com/egginsect/codvps/releases)
 EOF
+}
+
+# A file invocation is identified by its physical location, never by $PWD.
+# Resolve a bounded symlink chain; an unreadable/broken link must not turn
+# a source installation into the privileged release bootstrap.
+script_directory() {
+  local source=$CODVPS_SCRIPT_SOURCE directory target hops=0
+  [[ -n $source ]] || return 0 # curl | bash has no source filename.
+  while :; do
+    ((hops < 40)) || die 'installer symlink chain is too long'
+    hops=$((hops + 1))
+    [[ -f $source || -L $source ]] || die "cannot locate installer file: $source"
+    directory=.
+    [[ $source != */* ]] || directory=${source%/*}
+    [[ -n $directory ]] || directory=/
+    directory=$(cd -P -- "$directory" && pwd -P) ||
+      die "cannot resolve installer directory: $directory"
+    source="$directory/${source##*/}"
+    if [[ ! -L $source ]]; then
+      printf '%s\n' "$directory"
+      return 0
+    fi
+    target=$(readlink -- "$source") || die "cannot resolve installer symlink: $source"
+    if [[ $target == /* ]]; then
+      source=$target
+    else
+      source="$directory/$target"
+    fi
+  done
+}
+
+# Any source marker is sufficient to fail closed on an incomplete checkout.
+# The source helper validates the exact module and required build inputs.
+has_source_markers() {
+  local directory=$1
+  local marker
+  for marker in .git Makefile go.mod cmd/codvps tools/install-source.sh tools/install-cli.sh; do
+    [[ ! -e $directory/$marker && ! -L $directory/$marker ]] || return 0
+  done
+  return 1
 }
 
 # detect_arch prints the release architecture for this machine.
@@ -161,7 +221,7 @@ quote_cmd() {
   printf '%s\n' "${out% }"
 }
 
-main() {
+release_main() {
   local version=${CODVPS_VERSION:-latest}
   local releases=${CODVPS_RELEASES_URL:-$CODVPS_DEFAULT_RELEASES_URL}
   local tty=${CODVPS_BOOTSTRAP_TTY:-/dev/tty}
@@ -170,6 +230,7 @@ main() {
 
   while (($#)); do
     case "$1" in
+      --vps) shift ;;
       --version)
         (($# >= 2)) || die '--version requires a value, e.g. --version v0.1.0'
         version=$2
@@ -262,6 +323,33 @@ EOF
   say ''
   say 'Next: configure SSH and Git for GitHub with'
   say '  codvps login github'
+}
+
+# Only explicit release options can opt a recognized checkout into VPS setup.
+# Argument validation happens before dispatch, so typos never change modes.
+main() {
+  local directory release=0
+  local -a args=("$@")
+  directory=$(script_directory)
+  while (($#)); do
+    case "$1" in
+      --vps | --yes | -y) release=1; shift ;;
+      --version | --components | --switch)
+        release=1
+        (($# >= 2)) || { release_main "${args[@]}"; return; }
+        shift 2
+        ;;
+      --version=* | --components=* | --switch=*) release=1; shift ;;
+      -h | --help) usage; return 0 ;;
+      *) die "unknown argument: $1 (see install.sh --help)" ;;
+    esac
+  done
+  if ((!release)) && [[ -n $directory ]] && has_source_markers "$directory"; then
+    [[ -f $directory/tools/install-source.sh && -x $directory/tools/install-source.sh ]] ||
+      die "incomplete source checkout: missing executable tools/install-source.sh in $directory; restore the checkout, or use --vps explicitly for VPS setup"
+    exec "$directory/tools/install-source.sh"
+  fi
+  release_main "${args[@]}"
 }
 
 main "$@"

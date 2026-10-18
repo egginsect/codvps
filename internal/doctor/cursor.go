@@ -133,11 +133,14 @@ func (d *Check) checkCursorHead(st cursorState) {
 
 	for _, unit := range st.units {
 		name := strings.TrimSuffix(strings.TrimPrefix(unit, "cursor-remote@"), ".service")
+		dest, pathErr := repo.CheckoutPath(d.opts.Layout, name)
 		switch {
 		case registry.ValidateName(name) != nil:
 			d.Warn("enabled or running unit has an invalid repository instance: %s", unit)
-		case repo.IsPrimaryGitCheckout(d.opts.Runner, filepath.Join(d.home(), name)) != nil:
-			d.Warn("enabled or running unit %s has no repository at %s", unit, filepath.Join(d.home(), name))
+		case pathErr != nil:
+			d.Warn("enabled or running unit %s has no usable registered checkout: %v", unit, pathErr)
+		case repo.IsPrimaryGitCheckout(d.opts.Runner, dest) != nil:
+			d.Warn("enabled or running unit %s has no repository at %s", unit, dest)
 		default:
 			out, _, _, _ := d.opts.Runner.Run("systemctl", "--user", "is-active", unit)
 			switch active := strings.TrimSpace(out); active {

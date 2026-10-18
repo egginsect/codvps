@@ -15,6 +15,9 @@ set -euo pipefail
 [[ -n "${HOME:-}" ]] || { echo "FAIL: HOME not set"; exit 1; }
 [[ -n "${CODVPS_BIN:-}" ]] || { echo "FAIL: CODVPS_BIN not set"; exit 1; }
 
+WORK="$HOME/tmp/head20"
+EXTERNAL_ROOT=""
+WORKER_LOG="$HOME/.cache/fake-cursor/workers.log"
 FLAG="$HOME/.config/codvps/cursor-head-enabled"
 COMPONENTS=/etc/codvps/components.json
 UNIT_FILE=/etc/systemd/user/cursor-remote@.service
@@ -28,9 +31,15 @@ select_components() {
   sudo chmod 0644 "$COMPONENTS"
 }
 
-# shellcheck disable=SC2317
+# Invoked indirectly by the EXIT trap.
+# shellcheck disable=SC2317,SC2329
 cleanup() {
   "$CODVPS_BIN" disable cursor >/dev/null 2>&1 || true
+  "$CODVPS_BIN" repo remove cursor20 >/dev/null 2>&1 || true
+  if [[ -n $EXTERNAL_ROOT ]]; then
+    "$CODVPS_BIN" config unset repo_root >/dev/null 2>&1 || true
+    rm -rf "$EXTERNAL_ROOT"
+  fi
   sudo rm -f /usr/local/bin/agent /tmp/agent
   rm -rf "$HOME/.cursor"
   sudo rm -rf /etc/codvps
@@ -73,16 +82,24 @@ case "$1" in
     fi
     ;;
   worker)
+    worker_dir=""
     shift
     # Parse options before "start" subcommand
     while [[ $# -gt 0 ]]; do
       case "$1" in
-        --name|--worker-dir|--data-dir|--management-addr)
+        --worker-dir)
+          worker_dir=$2
+          shift 2
+          ;;
+        --name|--data-dir|--management-addr)
           shift 2
           ;;
         start)
           # Reached the start subcommand; options are in correct order
           shift
+          [[ -d "$worker_dir" ]] || exit 127
+          mkdir -p "$HOME/.cache/fake-cursor"
+          printf '%s\t%s\n' "$PWD" "$worker_dir" >>"$HOME/.cache/fake-cursor/workers.log"
           # Worker stays connected until stopped
           exec sleep infinity
           ;;
@@ -118,15 +135,19 @@ fi
 
 echo "OK: unit file found at $UNIT_FILE"
 
-# Verify the unit template has absolute paths, not relative ones
+# Executables and data remain absolute; worker-dir is relative to the resolved checkout.
 # shellcheck disable=SC2088
 if grep -q '~/' "$UNIT_FILE"; then
   note "cursor-remote@.service has relative paths (contains ~)"
 fi
 
 # Verify the unit has absolute ExecStart path
-if ! grep -q 'ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor -- %h/.local/bin/agent' "$UNIT_FILE"; then
+if ! grep -q 'ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor --repo %i -- %h/.local/bin/agent' "$UNIT_FILE"; then
   note "cursor-remote@.service ExecStart must run %h/.local/bin/agent through codvps internal shell-exec"
+fi
+
+if ! grep -Fxq 'WorkingDirectory=%h' "$UNIT_FILE"; then
+  note "Cursor must resolve the registered checkout after starting from HOME"
 fi
 
 # Verify worker options come before "start" subcommand
@@ -134,8 +155,8 @@ if ! grep -q 'worker --name %H-' "$UNIT_FILE"; then
   note "cursor-remote@.service must have: worker --name %H-... (options before start)"
 fi
 
-if ! grep -q 'worker-dir %h/%i' "$UNIT_FILE"; then
-  note "cursor-remote@.service must have: --worker-dir %h/%i"
+if ! grep -Fq -- '--worker-dir . --data-dir' "$UNIT_FILE"; then
+  note "cursor-remote@.service must resolve the registered checkout and use --worker-dir ."
 fi
 
 if ! grep -q 'data-dir %h/.local/share/cursor-agent/codvps-workers/%i' "$UNIT_FILE"; then
@@ -160,6 +181,23 @@ if [[ ! -f "$HOME/.cursor/auth.json" ]]; then
   echo "DEBUG: Expected file at $HOME/.cursor/auth.json"
 fi
 
+# Register a real Git checkout outside HOME, with a space in its parent path.
+# Unset the root before enabling Cursor, so only the persisted registry path
+# can supply the worker's working directory.
+rm -rf "$WORK"
+rm -f "$WORKER_LOG"
+mkdir -p "$WORK"
+git init -q -b main "$WORK/seed"
+git -C "$WORK/seed" -c user.name='Fakevps Test' -c user.email=fakevps@example.invalid \
+  commit -q --allow-empty -m init
+git clone -q --bare "$WORK/seed" "$WORK/cursor20.git"
+EXTERNAL_ROOT=$(mktemp -d '/tmp/codvps cursor20.XXXXXX')
+"$CODVPS_BIN" config set repo_root "$EXTERNAL_ROOT"
+"$CODVPS_BIN" repo add "$WORK/cursor20.git"
+"$CODVPS_BIN" config unset repo_root
+[[ -d "$EXTERNAL_ROOT/cursor20/.git" && ! -e "$HOME/cursor20" ]] ||
+  note "Cursor fixture was not cloned under the configured external root"
+
 # Test: enable cursor
 echo "DEBUG: Running enable cursor..."
 if "$CODVPS_BIN" enable cursor >/tmp/cursor_head.log 2>&1; then
@@ -176,6 +214,19 @@ if [[ ! -f "$FLAG" ]]; then
   echo "DEBUG: Expected flag at $FLAG"
 fi
 
+# Inspect both the fake provider's received argv and the real service's cwd.
+expected_worker=$(printf '%s\t.' "$EXTERNAL_ROOT/cursor20")
+for _ in {1..50}; do
+  grep -Fxq -- "$expected_worker" "$WORKER_LOG" 2>/dev/null && break
+  sleep 0.1
+done
+grep -Fxq -- "$expected_worker" "$WORKER_LOG" 2>/dev/null ||
+  note "Cursor did not receive --worker-dir . in the registered external checkout"
+pid=$(systemctl --user show cursor-remote@cursor20.service -p MainPID --value)
+cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+[[ $cwd == "$EXTERNAL_ROOT/cursor20" ]] || note "Cursor worker cwd is '$cwd', want the registered external checkout"
+systemctl --user is-active --quiet cursor-remote@cursor20.service || note "external Cursor worker is not active"
+
 # Test: disable cursor removes flag
 echo "DEBUG: Running disable cursor..."
 "$CODVPS_BIN" disable cursor >/dev/null 2>&1
@@ -183,6 +234,12 @@ if [[ -f "$FLAG" ]]; then
   note "disable did not remove the flag"
   echo "DEBUG: Flag still exists at $FLAG"
 fi
+
+if systemctl --user is-active --quiet cursor-remote@cursor20.service; then
+  note "disable cursor left the external worker active"
+fi
+"$CODVPS_BIN" repo remove cursor20
+[[ -d "$EXTERNAL_ROOT/cursor20/.git" ]] || note "repo remove deleted the external Cursor checkout"
 
 [[ $FAILED -eq 0 ]] && echo "OK: all cursor tests passed" || echo "FAILED: $FAILED checks failed"
 exit $FAILED

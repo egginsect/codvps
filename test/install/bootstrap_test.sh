@@ -196,7 +196,8 @@ nothing_installed
 
 CURRENT='checksum mismatch'
 cp "$WEB/download/v0.1.0/SHA256SUMS" "$WORK/sums.good"
-sed -i '/codvps-linux-amd64/s/^./0/; /codvps-linux-amd64/s/^0\(.\)/1\1/' "$WEB/download/v0.1.0/SHA256SUMS"
+# Always change the first digest character, even when it is already 0 or 1.
+sed -i '/codvps-linux-amd64/{s/^0/1/; t; s/^./0/;}' "$WEB/download/v0.1.0/SHA256SUMS"
 FAKE_SUDO=1 TTY_PATH="$WORK/tty-yes" run_install pipe --components claude --yes
 [[ $RC -ne 0 && $OUT == *'checksum mismatch for codvps-linux-amd64'* ]] || fail "rc=$RC: $OUT"
 nothing_installed

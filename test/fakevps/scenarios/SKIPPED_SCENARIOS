@@ -11,5 +11,5 @@ test_python3_present:not_ported
 test_heritage_sync_after_login:not_ported
 # Not ported: `heritage sync` is not a codvps command (owner rule in docs/test-parity.md), so there is no URL requirement to assert.
 test_zero_heritage_path_heritage_sync_requires_url:not_ported
-# Not ported: `codvps repo add` takes no flags by design; there is no Codex membership (codvps no longer sandboxes Codex Remote), so there is no --no-codex-member mode.
+# Not ported: `codvps repo add` supports --dest but has no membership flags; there is no Codex membership (codvps no longer sandboxes Codex Remote), so there is no --no-codex-member mode.
 test_repo_add_has_one_noninteractive_membership_mode:not_ported

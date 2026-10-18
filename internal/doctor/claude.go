@@ -154,11 +154,14 @@ func (d *Check) checkClaudeHead(st claudeState) {
 
 	for _, unit := range st.units {
 		name := strings.TrimSuffix(strings.TrimPrefix(unit, "claude-remote@"), ".service")
+		dest, pathErr := repo.CheckoutPath(d.opts.Layout, name)
 		switch {
 		case registry.ValidateName(name) != nil:
 			d.Warn("enabled or running unit has an invalid repository instance: %s", unit)
-		case repo.IsPrimaryGitCheckout(d.opts.Runner, filepath.Join(d.home(), name)) != nil:
-			d.Warn("enabled or running unit %s has no repository at %s", unit, filepath.Join(d.home(), name))
+		case pathErr != nil:
+			d.Warn("enabled or running unit %s has no usable registered checkout: %v", unit, pathErr)
+		case repo.IsPrimaryGitCheckout(d.opts.Runner, dest) != nil:
+			d.Warn("enabled or running unit %s has no repository at %s", unit, dest)
 		default:
 			// is-active exits non-zero for every state but active; the
 			// printed state is the answer.
