@@ -49,7 +49,7 @@ import (
 
 // Usage is `codvps install`'s usage line for the given providers.
 func Usage(set providers.Set) string {
-	return "codvps install [--components " + strings.Join(set.Implemented(providers.CodingCLI).Names(), ",") +
+	return "codvps install --system [--components " + strings.Join(set.Implemented(providers.CodingCLI).Names(), ",") +
 		"|none] [--switch " + strings.Join(append([]string{"none"}, set.Implemented(providers.Switch).Names()...), "|") +
 		"] [" + SkipProvisionFlag + "]"
 }
@@ -188,7 +188,11 @@ func resolveHost(opts Options, command string) (*host, error) {
 		return nil, err
 	}
 	if opts.EUID != 0 {
-		return nil, fmt.Errorf("codvps %s must be run as root: sudo codvps %s", command, command)
+		suffix := ""
+		if command == "install" {
+			suffix = " --system"
+		}
+		return nil, fmt.Errorf("codvps %s must be run as root: sudo codvps %s%s", command, command, suffix)
 	}
 	if opts.SudoUser == "" || opts.SudoUser == "root" {
 		if command == "uninstall" {

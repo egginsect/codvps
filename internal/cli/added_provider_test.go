@@ -86,7 +86,7 @@ func TestAddedProviderFlowsThroughHeadsLoginAndDoctor(t *testing.T) {
 	env := testHeadEnv(t, layout, runner.NewFakeRunner(), runner.NewFakeRunner())
 	env.providers = set
 
-	want := "fakecli is not a selected component; rerun with it selected, e.g.: sudo codvps install --components claude,codex,cursor,opencode,fakecli"
+	want := "fakecli is not a selected component; rerun with it selected, e.g.: sudo codvps install --system --components claude,codex,cursor,opencode,fakecli"
 	if err := env.headSetEnabled("fakecli", true); err == nil || err.Error() != want {
 		t.Fatalf("head enable fakecli unselected = %v", err)
 	}

@@ -60,6 +60,29 @@ backed up before atomic replacement. Symlinked destinations and non-file targets
 are refused. Installing the CLI does not enable remote access; use the
 [manual-mode setup](#hosts-without-systemd-manual-mode) below where appropriate.
 
+### Native user CLI installation (default)
+
+After installing codvps, run `codvps install` as your normal user. The default
+installs Claude Code, standalone Codex, and Cursor CLI from their official
+installers into their standard user locations. Existing user installations are
+verified with `--version` and preserved. No login or remote access is enabled.
+
+```bash
+codvps install --dry-run
+codvps install
+codvps install --components claude,codex,cursor
+```
+
+`--user` is an optional explicit alias for this default. This mode never invokes
+sudo, apt, systemd, linger, host provisioning, or the system component registry.
+It does not change session mode or stop existing services. Configure manual mode
+separately for a host without systemd. Provider installers may update their own
+user files and shell PATH; existing HOME and XDG settings are not replaced.
+
+Host provisioning now requires explicit `codvps install --system`, run via sudo.
+Legacy system flags (`--switch`, `--skip-provision`) are rejected without
+`--system`; they never implicitly select privileged installation.
+
 ### Full VPS installation
 
 From a source checkout, use `./install.sh --vps` to explicitly select the
@@ -84,7 +107,7 @@ The standalone/downloaded or piped script downloads the codvps binary for your
 architecture (linux amd64 or arm64), verifies it against the release's `SHA256SUMS` and the
 version it reports, and keeps it at `~/.local/share/codvps/<version>/codvps`.
 It then shows what will change and asks before running
-`sudo codvps install`, which provisions the host (apt packages, gh, Node.js,
+`sudo codvps install --system`, which provisions the host (apt packages, gh, Node.js,
 the selected coding CLIs, the bubblewrap AppArmor profile, swap, ufw; each
 step printed before it runs) and installs the codvps units. Without a
 terminal it prints that command instead of running it. Afterwards:
@@ -120,17 +143,17 @@ curl -fsSLO "https://github.com/egginsect/codvps/releases/download/$v/codvps-lin
 curl -fsSLO "https://github.com/egginsect/codvps/releases/download/$v/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS
 chmod +x "codvps-linux-$arch"
-sudo "./codvps-linux-$arch" install --components claude,codex --switch none
+sudo "./codvps-linux-$arch" install --system --components claude,codex --switch none
 ```
 
 Or build from the source tarball (Go toolchain required):
 
 ```bash
 curl -fsSL "https://github.com/egginsect/codvps/archive/refs/tags/$v.tar.gz" | tar -xz
-cd "codvps-${v#v}" && make build && sudo ./codvps install
+cd "codvps-${v#v}" && make build && sudo ./codvps install --system
 ```
 
-`sudo codvps install --skip-provision` wires up codvps on a host that is
+`sudo codvps install --system --skip-provision` wires up codvps on a host that is
 already provisioned.
 
 ## Build from source
@@ -178,6 +201,29 @@ Once explicit paths are saved, the registry uses versioned JSON. Older codvps
 binaries do not support that format; do not downgrade without backing up state
 and explicitly rebuilding a compatible registry. No checkout is moved by an
 upgrade.
+
+### Register an existing local GitHub checkout offline
+
+```bash
+codvps repo add-local /absolute/path/to/existing-checkout
+codvps run claude REPO
+```
+
+`add-local` reads the checkout's GitHub `origin` locally and registers its
+absolute path. It never runs gh, clone, fetch, or ls-remote, and never reconciles
+or starts provider heads. No GitHub login or network access is needed. Dirty
+files, branches and remotes are preserved. A missing path is an error, never a
+reason to clone. Conventional github.com HTTPS and Git SSH origins are accepted;
+credentials embedded in URLs, other hosts, aliases and custom ports are refused.
+The path must be the top level of a primary non-bare checkout; symlinked paths,
+linked worktrees and submodules are refused. Existing name/path registrations
+cannot be silently remapped.
+
+This checks the configured origin, not current remote existence, ownership or
+access. Later fetch/push operations need their own network access and Git
+credentials; provider authentication and Remote pairing remain separate.
+The older `repo add URL --dest PATH` can also reattach an existing checkout,
+but checks remote reachability with `git ls-remote`.
 
 ### GitHub without VPS SSH setup
 

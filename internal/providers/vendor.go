@@ -46,7 +46,7 @@ func (o *OperatorProvisioner) Home() string { return o.HomeDir }
 
 // Cmd implements Provisioner: a root step cannot run here.
 func (o *OperatorProvisioner) Cmd(name string, args ...string) error {
-	return fmt.Errorf("%s needs root; run sudo codvps install", strings.Join(append([]string{name}, args...), " "))
+	return fmt.Errorf("%s needs root; run sudo codvps install --system", strings.Join(append([]string{name}, args...), " "))
 }
 
 // AsOperator implements Provisioner: the snippet runs under bash with a
@@ -70,7 +70,7 @@ func EnsureInstalled(p *Provider, prov Provisioner, root string) (bool, error) {
 		return false, nil
 	}
 	if !p.Provision.AsOperator && os.Geteuid() != 0 {
-		return false, fmt.Errorf("%s is not installed and its installer needs root; run sudo codvps install --components %s", p.Name, p.Name)
+		return false, fmt.Errorf("%s is not installed and its installer needs root; run sudo codvps install --system --components %s", p.Name, p.Name)
 	}
 	if err := p.Provision.Run(prov); err != nil {
 		return false, fmt.Errorf("could not install %s: %w", p.Label, err)

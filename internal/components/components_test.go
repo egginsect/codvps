@@ -496,7 +496,7 @@ func TestRequireSelectedMessageMatchesReference(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for unselected codex")
 	}
-	want := "codex is not a selected component; select it first, e.g.: sudo codvps install --components claude,codex,cursor,opencode"
+	want := "codex is not a selected component; select it first, e.g.: sudo codvps install --system --components claude,codex,cursor,opencode"
 	if err.Error() != want {
 		t.Errorf("message = %q, want %q", err.Error(), want)
 	}
@@ -514,7 +514,7 @@ func TestResolveProvidersCodexUnselectedFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	want := "codex is not a selected component; select it first, e.g.: sudo codvps install --components claude,codex,cursor,opencode"
+	want := "codex is not a selected component; select it first, e.g.: sudo codvps install --system --components claude,codex,cursor,opencode"
 	if err.Error() != want {
 		t.Errorf("message = %q, want %q", err.Error(), want)
 	}
@@ -634,7 +634,7 @@ func TestFreshHostNeedsSelectionFalseWhenRegistryExists(t *testing.T) {
 }
 
 func TestFreshHostSelectionMessageMatchesReference(t *testing.T) {
-	want := "no component selection found on a fresh host with no TTY. Rerun with explicit flags, for example:\n  sudo codvps install --components claude,codex,cursor,opencode --switch none"
+	want := "no component selection found on a fresh host with no TTY. Rerun with explicit flags, for example:\n  sudo codvps install --system --components claude,codex,cursor,opencode --switch none"
 	if got := testCatalog.FreshHostSelectionMessage(); got != want {
 		t.Errorf("message = %q, want %q", got, want)
 	}
@@ -847,7 +847,7 @@ func TestRequireSelectedForHeadMessageMatchesReference(t *testing.T) {
 	writeRegistry(t, layout, &Registry{CodingCLIs: []string{"codex"}, Switch: "none"})
 
 	err := testCatalog.RequireSelectedForHead(layout, "claude")
-	want := "claude is not a selected component; rerun with it selected, e.g.: sudo codvps install --components claude,codex,cursor,opencode"
+	want := "claude is not a selected component; rerun with it selected, e.g.: sudo codvps install --system --components claude,codex,cursor,opencode"
 	if err == nil || err.Error() != want {
 		t.Fatalf("RequireSelectedForHead = %v, want %q", err, want)
 	}
@@ -922,7 +922,7 @@ func TestAddedProviderFlowsThroughSelectionAndStatus(t *testing.T) {
 	if err := cat.RequireSelected(layout, "fakecli"); err != nil {
 		t.Fatalf("RequireSelected(fakecli) = %v", err)
 	}
-	want := "claude is not a selected component; select it first, e.g.: sudo codvps install --components claude,codex,cursor,opencode,fakecli"
+	want := "claude is not a selected component; select it first, e.g.: sudo codvps install --system --components claude,codex,cursor,opencode,fakecli"
 	if err := cat.RequireSelected(layout, "claude"); err == nil || err.Error() != want {
 		t.Fatalf("RequireSelected(claude) = %v, want %q", err, want)
 	}

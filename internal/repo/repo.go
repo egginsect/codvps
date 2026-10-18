@@ -73,6 +73,10 @@ func (rm *RepoManager) Add(url string) error {
 // An omitted destination uses the persisted path for an existing registration,
 // or the configured repository root for a new one. Registrations never move.
 func (rm *RepoManager) AddAt(url, dest string) error {
+	return rm.addAt(url, dest, false)
+}
+
+func (rm *RepoManager) addAt(url, dest string, localOnly bool) error {
 	name, err := registry.RepoNameFromURL(url)
 	if err != nil {
 		return fmt.Errorf("invalid repository URL: %w", err)
@@ -121,18 +125,31 @@ func (rm *RepoManager) AddAt(url, dest string) error {
 		return err
 	}
 
+	var localGitInfo os.FileInfo
 	fi, statErr := os.Lstat(dest)
 	existed := statErr == nil
 	switch {
 	case existed && !fi.IsDir():
 		return fmt.Errorf("repository path %q exists and is not a directory", dest)
 	case existed:
-		if err := validateExistingCheckoutForURL(rm.git, dest, url); err != nil {
+		if localOnly {
+			if err := rm.validateLocalCheckout(dest); err != nil {
+				return err
+			}
+			localGitInfo, err = os.Lstat(filepath.Join(dest, ".git"))
+			if err != nil {
+				return err
+			}
+		}
+		if err := validateExistingCheckout(rm.git, dest, url, !localOnly); err != nil {
 			return err
 		}
 	case !os.IsNotExist(statErr):
 		return fmt.Errorf("failed to inspect repository path %q: %w", dest, statErr)
 	default:
+		if localOnly {
+			return fmt.Errorf("local checkout %q is missing; registration never clones", dest)
+		}
 		// A registered checkout's missing parent can be an unavailable mount.
 		// Do not recreate it and accidentally clone onto the wrong filesystem.
 		if registered {
@@ -184,6 +201,22 @@ func (rm *RepoManager) AddAt(url, dest string) error {
 		if !os.SameFile(fi, currentInfo) {
 			return nil, fmt.Errorf("checkout %q changed during add; retry", dest)
 		}
+		if localOnly {
+			if err := rm.validateLocalCheckout(dest); err != nil {
+				return nil, err
+			}
+			if err := validateExistingCheckout(rm.git, dest, url, false); err != nil {
+				return nil, err
+			}
+			finalDir, e := os.Lstat(dest)
+			if e != nil || !os.SameFile(fi, finalDir) {
+				return nil, fmt.Errorf("local checkout changed during registration")
+			}
+			finalGit, e := os.Lstat(filepath.Join(dest, ".git"))
+			if e != nil || !os.SameFile(localGitInfo, finalGit) {
+				return nil, fmt.Errorf("local Git directory changed during registration")
+			}
+		}
 		if found {
 			return current, nil
 		}
@@ -206,6 +239,10 @@ func (rm *RepoManager) AddAt(url, dest string) error {
 			})
 		}
 		return fmt.Errorf("failed to update registry: %w", err)
+	}
+
+	if localOnly {
+		return nil
 	}
 
 	// Registration succeeded and stays regardless of what happens below: a
@@ -538,6 +575,10 @@ func IsPrimaryGitCheckout(git runner.Runner, dest string) error {
 // a checkout whose remote used to exist but has since vanished or gone
 // unreachable must not be silently reattached.
 func validateExistingCheckoutForURL(git runner.Runner, dest, url string) error {
+	return validateExistingCheckout(git, dest, url, true)
+}
+
+func validateExistingCheckout(git runner.Runner, dest, url string, checkRemote bool) error {
 	if err := isPrimaryGitCheckout(git, dest); err != nil {
 		return err
 	}
@@ -556,6 +597,9 @@ func validateExistingCheckoutForURL(git runner.Runner, dest, url string) error {
 	}
 	if originIdentity != requestedIdentity {
 		return fmt.Errorf("existing checkout origin does not match requested repository: origin=%s requested=%s", originURL, url)
+	}
+	if !checkRemote {
+		return nil
 	}
 	if _, lsStderr, lsCode, lsErr := git.Run("git", "ls-remote", "--", url); lsErr != nil || lsCode != 0 {
 		return fmt.Errorf("requested repository remote is not reachable without prompting: %s: %s", url, strings.TrimSpace(lsStderr))

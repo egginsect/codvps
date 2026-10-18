@@ -88,7 +88,7 @@ No terminal is needed: when not logged in, GitHub's device flow starts
 anyway and prints its URL and one-time code (open it on any device), and each
 prompt without a terminal takes its default answer, reported as "assuming yes:
 ...". A missing or too-old gh is installed or upgraded first (needs sudo; without
-a terminal, run sudo codvps install instead).
+a terminal, run sudo codvps install --system instead).
 
 Flags:
   --auth-only               GitHub HTTPS authentication only (no VPS/SSH setup)

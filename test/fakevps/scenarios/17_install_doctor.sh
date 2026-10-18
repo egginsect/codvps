@@ -35,7 +35,7 @@ set -euo pipefail
 # test_doctor_warns_about_a_dangling_control_socket_link.
 #
 # Adaptations:
-#   - `sudo codvps install` replaces `sudo bash install.sh`. Package and
+#   - `sudo codvps install --system` replaces `sudo bash install.sh`. Package and
 #     vendor provisioning (apt, node, gh, jq, rg, pnpm, bwrap, the AppArmor
 #     profile, the vendor installers) is skipped with --skip-provision, so this
 #     scenario stands in root-owned stubs for the tools doctor looks for
@@ -87,7 +87,7 @@ codvps() { "$BUILD" "$@"; }
 # --skip-provision: host provisioning (apt, vendor installers, swap, ufw;
 #) needs the network and is unit-tested with fakes in
 # internal/install; this scenario covers the codvps wiring.
-install_as_root() { run sudo "$BUILD" install --skip-provision "$@" </dev/null; }
+install_as_root() { run sudo "$BUILD" install --system --skip-provision "$@" </dev/null; }
 daemon_pid() { cat "$CACHE/remote-control.pid" 2>/dev/null || true; }
 has_line() { grep -Fxq -- "$1" <<<"$OUT"; }
 
@@ -194,11 +194,11 @@ test_user_and_repo_root() {
 
 test_install_requires_non_root_operator() {
   local expected='run the installer as a normal sudo-capable user via sudo, because systemd --user + linger need a login account'
-  run sudo env -u SUDO_USER "$BUILD" install --components claude </dev/null
+  run sudo env -u SUDO_USER "$BUILD" install --system --components claude </dev/null
   [[ $RC -ne 0 && $OUT == *"$expected"* ]] || note "install accepted a missing SUDO_USER (rc=$RC): $OUT"
-  run sudo env SUDO_USER=root "$BUILD" install --components claude </dev/null
+  run sudo env SUDO_USER=root "$BUILD" install --system --components claude </dev/null
   [[ $RC -ne 0 && $OUT == *"$expected"* ]] || note "install accepted SUDO_USER=root (rc=$RC): $OUT"
-  run "$BUILD" install --components claude </dev/null
+  run "$BUILD" install --system --components claude </dev/null
   [[ $RC -ne 0 && $OUT == *'must be run as root'* ]] || note "install ran without root (rc=$RC): $OUT"
   [[ ! -e $COMPONENTS ]] || note "a refused install wrote $COMPONENTS"
 }

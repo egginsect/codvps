@@ -29,7 +29,7 @@ LDFLAGS := -ldflags "-X github.com/egginsect/codvps/internal/buildinfo.Version=$
 build:
 	CGO_ENABLED=0 $(call shell_quote,$(value GO)) build -trimpath $(LDFLAGS) -o $(BINARY_NAME) ./cmd/codvps
 
-# Install only the CLI. VPS provisioning remains `sudo codvps install`.
+# Install only the CLI. VPS provisioning remains `sudo codvps install --system`.
 install: build
 	tools/install-cli.sh "./$(BINARY_NAME)" $(call shell_quote,$(value PREFIX)) $(call shell_quote,$(value DESTDIR))
 

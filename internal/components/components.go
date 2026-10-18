@@ -30,7 +30,7 @@ import (
 // its own install.sh from $SCRIPT_DIR; codvps ships no script directory,
 // so the messages name the installed command instead, built through this
 // one constant so the wording only has to change in one place.
-const InstallCommand = "codvps install"
+const InstallCommand = "codvps install --system"
 
 // RegistryFileName is the file name of the component-selection registry
 // inside the etc directory (paths.Layout.EtcPath()).

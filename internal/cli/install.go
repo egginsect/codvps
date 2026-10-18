@@ -6,8 +6,10 @@ import (
 	"github.com/egginsect/codvps/internal/components"
 	"github.com/egginsect/codvps/internal/head"
 	"github.com/egginsect/codvps/internal/providers"
+	"github.com/egginsect/codvps/internal/userinstall"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/egginsect/codvps/internal/doctor"
@@ -20,11 +22,48 @@ import (
 	"github.com/egginsect/codvps/internal/systemd"
 )
 
-// installCmd handles `codvps install` (root, through sudo).
+// installCmd defaults to user CLIs. Host provisioning needs explicit --system.
 type installCmd struct{}
 
 func (c *installCmd) Execute(args []string) error {
-	return install.Install(installOptions(), args)
+	system, user := false, false
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--system":
+			if system {
+				return fmt.Errorf("duplicate --system")
+			}
+			system = true
+		case "--user":
+			if user {
+				return fmt.Errorf("duplicate --user")
+			}
+			user = true
+		case "--components", "--switch":
+			if i+1 == len(args) || strings.HasPrefix(args[i+1], "--") {
+				return fmt.Errorf("%s requires a value", arg)
+			}
+			rest = append(rest, arg, args[i+1])
+			i++
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	if system && user {
+		return fmt.Errorf("--system and --user cannot be combined")
+	}
+	if len(rest) == 1 && (rest[0] == "--help" || rest[0] == "help") {
+		fmt.Println(userinstall.Usage + "\nSystem provisioning requires explicit --system (sudo). " + install.Usage(providers.All()))
+		return nil
+	}
+	if system {
+		return install.Install(installOptions(), rest)
+	}
+	home := os.Getenv("HOME")
+	r := runner.NewExecRunner("CODEX_HOME="+filepath.Join(home, ".codex"), "CODEX_INSTALL_DIR="+filepath.Join(home, ".local", "bin"), "CODEX_NON_INTERACTIVE=1", "CODEX_INSTALL_DAEMON_ONLY=0", "CODEX_INSTALL_DEFER_SELECTION=0", "CODEX_INSTALL_IF_LATEST=0", "CODEX_INSTALL_IF_CURRENT=0")
+	return userinstall.Install(userinstall.Options{Home: home, EUID: os.Geteuid(), Runner: r, Out: os.Stdout, Diag: os.Stderr}, rest)
 }
 
 // uninstallCmd handles `codvps uninstall [--dry-run]` (root, through sudo).

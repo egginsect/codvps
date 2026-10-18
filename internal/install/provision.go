@@ -1,7 +1,7 @@
 package install
 
 // Host provisioning: the network-dependent half of the reference
-// installer, run by `sudo codvps install` before it wires codvps up. The
+// installer, run by `sudo codvps install --system` before it wires codvps up. The
 // bootstrap script (install.sh) only fetches and verifies the binary; every
 // host change lives here so it goes through the injected runner, is shown
 // before it runs, and is unit-tested with fakes.
