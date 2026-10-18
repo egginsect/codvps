@@ -568,16 +568,12 @@ func IsPrimaryGitCheckout(git runner.Runner, dest string) error {
 	return nil
 }
 
-// validateExistingCheckoutForURL rejects a non-primary checkout, requires
+// validateExistingCheckout rejects a non-primary checkout, requires
 // the checkout's origin remote to canonically match url, and finally
-// requires url itself to be reachable without prompting for credentials
+// when checkRemote is true, requires url to be reachable without prompting for credentials
 // (the reference's closing `GIT_TERMINAL_PROMPT=0 git ls-remote` check):
 // a checkout whose remote used to exist but has since vanished or gone
 // unreachable must not be silently reattached.
-func validateExistingCheckoutForURL(git runner.Runner, dest, url string) error {
-	return validateExistingCheckout(git, dest, url, true)
-}
-
 func validateExistingCheckout(git runner.Runner, dest, url string, checkRemote bool) error {
 	if err := isPrimaryGitCheckout(git, dest); err != nil {
 		return err

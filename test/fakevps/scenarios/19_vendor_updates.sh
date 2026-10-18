@@ -98,7 +98,7 @@ SH
 }
 
 test_install_retires_the_pinned_runtimes() {
-  run sudo "$BUILD" install --components claude,codex --switch none --skip-provision </dev/null
+  run sudo "$BUILD" install --system --components claude,codex --switch none --skip-provision </dev/null
   [[ $RC -eq 0 ]] || { note "install failed (rc=$RC): $OUT"; return; }
   [[ $OUT == *'removed the pinned runtime copies'* ]] || note "install did not report retiring the pinned runtimes: $OUT"
   [[ ! -e $LEGACY_DROPIN && ! -e $LEGACY_ROOT ]] || note "install left the pinning drop-in or $LEGACY_ROOT"

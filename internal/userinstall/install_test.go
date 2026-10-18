@@ -97,8 +97,12 @@ func TestRejectEscapeBeforeAnyInstaller(t *testing.T) {
 func TestRejectBrokenExistingBinary(t *testing.T) {
 	o, r, _ := fixture(t)
 	bin := filepath.Join(o.Home, providers[0].binary)
-	os.MkdirAll(filepath.Dir(bin), 0755)
-	os.WriteFile(bin, []byte("existing"), 0644)
+	if err := os.MkdirAll(filepath.Dir(bin), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("existing"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if Install(o, []string{"--components", "claude"}) == nil {
 		t.Fatal("accepted non executable")
 	}
@@ -174,8 +178,12 @@ func TestRejectEscapingProviderStorageBeforeExecution(t *testing.T) {
 func TestPreserveCursorAliasWithoutAgent(t *testing.T) {
 	o, r, _ := fixture(t)
 	alias := filepath.Join(o.Home, ".local/bin/cursor-agent")
-	os.MkdirAll(filepath.Dir(alias), 0755)
-	os.WriteFile(alias, []byte("keep"), 0755)
+	if err := os.MkdirAll(filepath.Dir(alias), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(alias, []byte("keep"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	if Install(o, []string{"--components", "cursor"}) == nil {
 		t.Fatal("accepted alias overwrite")
 	}
@@ -187,8 +195,12 @@ func TestPreserveCursorAliasWithoutAgent(t *testing.T) {
 func TestRejectEscapingShellProfile(t *testing.T) {
 	o, r, _ := fixture(t)
 	target := filepath.Join(t.TempDir(), "profile")
-	os.WriteFile(target, []byte("keep"), 0600)
-	os.Symlink(target, filepath.Join(o.Home, ".bashrc"))
+	if err := os.WriteFile(target, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(o.Home, ".bashrc")); err != nil {
+		t.Fatal(err)
+	}
 	if Install(o, nil) == nil {
 		t.Fatal("accepted profile escape")
 	}
@@ -200,10 +212,18 @@ func TestRejectEscapingShellProfile(t *testing.T) {
 func TestRejectNestedStorageRedirect(t *testing.T) {
 	o, r, _ := fixture(t)
 	storage := filepath.Join(o.Home, "storage")
-	os.MkdirAll(storage, 0755)
-	os.Symlink(t.TempDir(), filepath.Join(storage, "versions"))
-	os.MkdirAll(filepath.Join(o.Home, ".local/share"), 0755)
-	os.Symlink(storage, filepath.Join(o.Home, ".local/share/cursor-agent"))
+	if err := os.MkdirAll(storage, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(storage, "versions")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(o.Home, ".local/share"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(storage, filepath.Join(o.Home, ".local/share/cursor-agent")); err != nil {
+		t.Fatal(err)
+	}
 	if Install(o, nil) == nil {
 		t.Fatal("accepted nested redirect")
 	}
@@ -215,9 +235,15 @@ func TestAllowOfficialCodexCurrentSelection(t *testing.T) {
 	o, r, _ := fixture(t)
 	root := filepath.Join(o.Home, ".codex/packages/standalone")
 	release := filepath.Join(root, "releases", "one")
-	os.MkdirAll(release, 0755)
-	os.WriteFile(filepath.Join(release, "codex"), []byte("native"), 0755)
-	os.Symlink(release, filepath.Join(root, "current"))
+	if err := os.MkdirAll(release, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(release, "codex"), []byte("native"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(release, filepath.Join(root, "current")); err != nil {
+		t.Fatal(err)
+	}
 	if err := Install(o, []string{"--components", "codex"}); err != nil {
 		t.Fatal(err)
 	}
@@ -229,12 +255,30 @@ func TestAllowOfficialCodexCurrentSelection(t *testing.T) {
 func TestPreserveCodexWithoutStandalonePackage(t *testing.T) {
 	o, r, _ := fixture(t)
 	alias := filepath.Join(o.Home, ".local/bin/codex")
-	os.MkdirAll(filepath.Dir(alias), 0755)
-	os.WriteFile(alias, []byte("keep"), 0755)
+	if err := os.MkdirAll(filepath.Dir(alias), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(alias, []byte("keep"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	if Install(o, []string{"--components", "codex"}) == nil {
 		t.Fatal("accepted existing Codex overwrite")
 	}
 	if len(r.Calls) > 0 {
 		t.Fatal("executed")
+	}
+}
+
+type failingOutput struct{}
+
+func (failingOutput) Write([]byte) (int, error) { return 0, fmt.Errorf("output unavailable") }
+func TestOutputFailureStopsBeforeInstaller(t *testing.T) {
+	o, r, _ := fixture(t)
+	o.Out = failingOutput{}
+	if err := Install(o, []string{"--components", "claude"}); err == nil {
+		t.Fatal("ignored output error")
+	}
+	if len(r.Calls) != 0 {
+		t.Fatal("ran installer after output failure")
 	}
 }

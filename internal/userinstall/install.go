@@ -186,14 +186,18 @@ func Install(o Options, args []string) error {
 				return fmt.Errorf("existing %s is not an executable regular file", bin)
 			}
 			if dry {
-				fmt.Fprintf(o.Out, "%s: keep %s\n", p.name, bin)
+				if _, err := fmt.Fprintf(o.Out, "%s: keep %s\n", p.name, bin); err != nil {
+					return err
+				}
 				continue
 			}
 			version, stderr, code, err := o.Runner.Run(bin, "--version")
 			if err != nil || code != 0 {
 				return fmt.Errorf("existing %s failed --version; left unchanged: %s", p.name, strings.TrimSpace(stderr))
 			}
-			fmt.Fprintf(o.Out, "%s: already installed at %s (%s); kept unchanged\n", p.name, bin, strings.TrimSpace(version))
+			if _, err := fmt.Fprintf(o.Out, "%s: already installed at %s (%s); kept unchanged\n", p.name, bin, strings.TrimSpace(version)); err != nil {
+				return err
+			}
 			continue
 		}
 		if !os.IsNotExist(statErr) {
@@ -211,7 +215,9 @@ func Install(o Options, args []string) error {
 				return err
 			}
 		}
-		fmt.Fprintf(o.Out, "%s: install for current user from %s\n", p.name, p.url)
+		if _, err := fmt.Fprintf(o.Out, "%s: install for current user from %s\n", p.name, p.url); err != nil {
+			return err
+		}
 		if dry {
 			continue
 		}
@@ -229,10 +235,16 @@ func Install(o Options, args []string) error {
 		if err != nil || code != 0 {
 			return fmt.Errorf("%s verification failed: %s", p.name, strings.TrimSpace(stderr))
 		}
-		fmt.Fprintf(o.Out, "%s: installed %s (%s)\n", p.name, bin, strings.TrimSpace(version))
+		if _, err := fmt.Fprintf(o.Out, "%s: installed %s (%s)\n", p.name, bin, strings.TrimSpace(version)); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintln(o.Out, "User CLI installation checked. No login, remote access, system services or host provisioning were enabled.")
-	fmt.Fprintln(o.Out, "For hosts without systemd, configure separately: codvps config set session_mode manual")
+	if _, err := fmt.Fprintln(o.Out, "User CLI installation checked. No login, remote access, system services or host provisioning were enabled."); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(o.Out, "For hosts without systemd, configure separately: codvps config set session_mode manual"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -241,7 +253,7 @@ func installOne(o Options, p provider) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	script := filepath.Join(dir, "install.sh")
 	_, stderr, code, err := o.Runner.Run("curl", "--disable", "--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "15", "--max-time", "120", "--output", script, p.url)
 	if err != nil || code != 0 {

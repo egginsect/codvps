@@ -21,7 +21,7 @@ type offlineGit struct {
 
 func (g *offlineGit) Run(name string, args ...string) (string, string, int, error) {
 	g.t.Helper()
-	if name != "git" || len(args) < 4 || args[0] != "-C" || (args[2] != "rev-parse" && !(len(args) == 5 && reflect.DeepEqual(args[2:], []string{"remote", "get-url", "origin"}))) {
+	if name != "git" || len(args) < 4 || args[0] != "-C" || (args[2] != "rev-parse" && (len(args) != 5 || !reflect.DeepEqual(args[2:], []string{"remote", "get-url", "origin"}))) {
 		g.t.Fatalf("nonlocal command forbidden: %s %v", name, args)
 	}
 	g.calls = append(g.calls, append([]string{}, args...))
@@ -50,7 +50,9 @@ func TestAddLocalOfflinePreservesCheckoutAndNeverStartsHeads(t *testing.T) {
 			layout := newTestLayout(t)
 			dest := localCheckout(t, origin)
 			marker := filepath.Join(dest, "dirty.txt")
-			os.WriteFile(marker, []byte("keep"), 0600)
+			if err := os.WriteFile(marker, []byte("keep"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			g := &offlineGit{t: t, real: runner.NewExecRunner()}
 			head := newFakeHeadReconciler()
 			rm := NewRepoManager(layout, g, fakeHeads(head))
@@ -120,14 +122,18 @@ func TestAddLocalRejectsSymlinkAndGitfile(t *testing.T) {
 	layout := newTestLayout(t)
 	dest := localCheckout(t, "https://github.com/owner/repo.git")
 	link := filepath.Join(t.TempDir(), "link")
-	os.Symlink(dest, link)
+	if err := os.Symlink(dest, link); err != nil {
+		t.Fatal(err)
+	}
 	g := &offlineGit{t: t, real: runner.NewExecRunner()}
 	rm := NewRepoManager(layout, g, nil)
 	if rm.AddLocal(link) == nil {
 		t.Fatal("accepted symlink")
 	}
 	other := t.TempDir()
-	os.WriteFile(filepath.Join(other, ".git"), []byte("gitdir: "+filepath.Join(dest, ".git")), 0600)
+	if err := os.WriteFile(filepath.Join(other, ".git"), []byte("gitdir: "+filepath.Join(dest, ".git")), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if rm.AddLocal(other) == nil {
 		t.Fatal("accepted gitfile")
 	}
@@ -157,7 +163,9 @@ func TestAddLocalDisappearsBeforeTransactionNeverClones(t *testing.T) {
 	g.before = func(args []string) {
 		if !removed && args[2] == "remote" {
 			removed = true
-			os.Rename(dest, dest+"-moved")
+			if err := os.Rename(dest, dest+"-moved"); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	if NewRepoManager(layout, g, nil).AddLocal(dest) == nil {
