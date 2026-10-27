@@ -169,11 +169,12 @@ test_unit_installed() {
   [[ -f $UNIT_FILE ]] || note "$UNIT_FILE is not installed"
   grep -Fq 'UnsetEnvironment=ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_BASE_URL' "$UNIT_FILE" ||
     note "claude-remote@.service does not scrub provider credentials"
-  grep -Fq 'ExecStart=/usr/local/bin/codvps internal shell-exec --provider claude --repo %i -- claude remote-control' "$UNIT_FILE" ||
-    note "claude-remote@.service does not start claude through codvps internal shell-exec"
+  grep -Fxq 'ExecStart=/usr/local/bin/codvps internal remote-start --provider claude --repo %i' "$UNIT_FILE" ||
+    note "claude-remote@.service does not start claude through codvps internal remote-start"
   grep -Fxq 'WorkingDirectory=%h' "$UNIT_FILE" || note "Claude must resolve the registered checkout after starting from HOME"
   grep -Fxq 'Restart=always' "$UNIT_FILE" || note "claude-remote@.service is not Restart=always"
-  grep -Fq -- '--no-create-session-in-dir' "$UNIT_FILE" || note "claude-remote@.service may open interactive sessions"
+  # The --no-create-session-in-dir argv now comes from codvps internal
+  # remote-start; the heads below check the fake claude's logged argv.
 }
 
 test_head_seeds_workspace_trust() {

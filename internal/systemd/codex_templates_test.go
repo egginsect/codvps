@@ -105,10 +105,10 @@ func TestCodexWorkspacesDropIn_OwnsOnlyGeneratedContent(t *testing.T) {
 		"":                            false,
 		"[Service]":                   false,
 		generated + "PrivateTmp=no\n": false,
-		"[Service]\nBindPaths=/home/other/repo\n":                             false,
-		"[Service]\nBindPaths=/home/operator/repo-a/../../etc\n":              false,
-		"[Service]\nBindPaths=/home/operator/repo-a\n# site policy\n":         false,
-		"[Unit]\nBindPaths=/home/operator/repo-a\n":                           false,
+		"[Service]\nBindPaths=/home/other/repo\n":                         false,
+		"[Service]\nBindPaths=/home/operator/repo-a/../../etc\n":          false,
+		"[Service]\nBindPaths=/home/operator/repo-a\n# site policy\n":     false,
+		"[Unit]\nBindPaths=/home/operator/repo-a\n":                       false,
 		"[Service]\nTemporaryFileSystem=/home/operator/repo-a/other:ro\n": false,
 	} {
 		if got := d.Owns([]byte(content)); got != want {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/egginsect/codvps/internal/head"
 	"github.com/egginsect/codvps/internal/paths"
@@ -13,7 +14,7 @@ import (
 )
 
 const runUsage = "codvps run <claude|codex|cursor> <repo> [-- CLI-ARGS...]"
-const remoteUsage = "codvps remote run <claude|cursor> <repo> | remote <start|stop|pair|status> codex"
+const remoteUsage = "codvps remote start <claude|cursor> [<repo>] [--background|-d] | remote stop <claude|cursor> [<repo>] | remote status [<claude|cursor> [<repo>]] | remote run <claude|cursor> <repo> | remote <start|stop|pair|status> codex"
 
 type runCmd struct{}
 
@@ -42,8 +43,27 @@ func (*runCmd) Execute(args []string) error {
 
 type remoteCmd struct{}
 
+// remoteWorkers builds the background worker manager; tests replace it.
+var remoteWorkers = newWorkers
+
 func (*remoteCmd) Execute(args []string) error {
-	if len(args) < 2 || len(args) > 3 {
+	if len(args) == 0 {
+		return invalidUsage(remoteUsage)
+	}
+	action := args[0]
+	background := false
+	var positional []string
+	for _, arg := range args[1:] {
+		switch {
+		case arg == "--background" || arg == "-d":
+			background = true
+		case strings.HasPrefix(arg, "-"):
+			return invalidUsage(remoteUsage)
+		default:
+			positional = append(positional, arg)
+		}
+	}
+	if len(positional) > 2 || (background && action != "start") || (len(positional) == 0 && action != "status") {
 		return invalidUsage(remoteUsage)
 	}
 	layout, err := paths.New("")
@@ -53,18 +73,40 @@ func (*remoteCmd) Execute(args []string) error {
 	if err := requireManualMode(layout); err != nil {
 		return err
 	}
-	action, provider := args[0], args[1]
-	if action == "status" && provider == "codex" && len(args) == 2 {
-		socket := head.ControlSocket(filepath.Join(layout.Home(), ".codex"))
-		if err := head.ControlSocketListening(socket); err != nil {
-			return fmt.Errorf("codex daemon is not reachable in this process namespace: %w", err)
-		}
-		fmt.Println("Codex control socket is listening. Client registration and UI task visibility must be verified in the connected client.")
-		return nil
+	provider, repository := "", ""
+	if len(positional) > 0 {
+		provider = positional[0]
 	}
-	repository := ""
-	if len(args) == 3 {
-		repository = args[2]
+	if len(positional) > 1 {
+		repository = positional[1]
+	}
+	switch provider {
+	case "", "claude", "cursor":
+	case "codex":
+		return remoteCodex(layout, action, repository, background)
+	default:
+		return fmt.Errorf("unknown remote provider %q (choose claude, cursor or codex)", provider)
+	}
+	w := remoteWorkers(layout)
+	switch action {
+	case "status":
+		return w.status(provider, repository)
+	case "stop":
+		return w.stop(provider, repository)
+	case "start":
+		if repository == "" {
+			cursorNote(provider)
+			if !background {
+				fmt.Fprintf(os.Stderr, "No repository given: starting one background %s worker per registered repository (logs under %s).\n", provider, layout.RemoteDir())
+			}
+			return w.startAll(provider)
+		}
+		if background {
+			cursorNote(provider)
+			return w.startOne(provider, repository)
+		}
+		// One repository in the foreground is run.
+		action = "run"
 	}
 	git, err := sessionGit(layout)
 	if err != nil {
@@ -74,10 +116,42 @@ func (*remoteCmd) Execute(args []string) error {
 	if err != nil {
 		return err
 	}
+	cursorNote(provider)
+	return session.Execute(plan)
+}
+
+func cursorNote(provider string) {
 	if provider == "cursor" {
 		fmt.Fprintln(os.Stderr, "Cursor Remote requires a Cloud Agents plan. Code and context are sent to Cursor; the worker has this account's filesystem access, beyond the selected checkout.")
 	}
-	if provider == "codex" && action == "start" {
+}
+
+// remoteCodex is the host-wide Codex lifecycle: Codex's own daemon
+// detaches, so --background changes nothing.
+func remoteCodex(layout *paths.Layout, action, repository string, background bool) error {
+	if repository != "" {
+		return fmt.Errorf("codex Remote is host-wide; omit the repository and select its directory in the connected client")
+	}
+	if action == "status" {
+		socket := head.ControlSocket(filepath.Join(layout.Home(), ".codex"))
+		if err := head.ControlSocketListening(socket); err != nil {
+			return fmt.Errorf("codex daemon is not reachable in this process namespace: %w", err)
+		}
+		fmt.Println("Codex control socket is listening. Client registration and UI task visibility must be verified in the connected client.")
+		return nil
+	}
+	git, err := sessionGit(layout)
+	if err != nil {
+		return err
+	}
+	plan, err := session.Remote(layout, action, "codex", "", git)
+	if err != nil {
+		return err
+	}
+	if background {
+		fmt.Fprintln(os.Stderr, "Codex Remote's daemon detaches on its own; --background is ignored.")
+	}
+	if action == "start" {
 		fmt.Fprintln(os.Stderr, "Codex Remote is host-wide. Pair/register this host in the connected client to create visible remote tasks; a running daemon alone does not establish client access.")
 	}
 	return session.Execute(plan)
@@ -104,7 +178,7 @@ func requireSystemdMode() error {
 		return err
 	}
 	if cfg.SessionMode == "manual" {
-		return fmt.Errorf("session_mode is manual; use codvps remote for native remote commands, or set session_mode systemd to manage installed services")
+		return fmt.Errorf("session_mode is manual; start native remote workers with codvps remote start <claude|cursor|codex> [repo] [--background], or set session_mode systemd to manage installed services")
 	}
 	return nil
 }

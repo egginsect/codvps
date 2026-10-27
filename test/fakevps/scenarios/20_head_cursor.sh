@@ -10,7 +10,8 @@ set -euo pipefail
 #   - login cursor is gated on cursor being selected
 #   - enable cursor with login succeeds
 #   - disable cursor removes the flag
-#   - Cursor head unit template has absolute paths (%h, %H, not ~ or %h--)
+#   - Cursor head unit template has no ~ paths and starts the worker through
+#     codvps internal remote-start
 
 [[ -n "${HOME:-}" ]] || { echo "FAIL: HOME not set"; exit 1; }
 [[ -n "${CODVPS_BIN:-}" ]] || { echo "FAIL: CODVPS_BIN not set"; exit 1; }
@@ -135,36 +136,26 @@ fi
 
 echo "OK: unit file found at $UNIT_FILE"
 
-# Executables and data remain absolute; worker-dir is relative to the resolved checkout.
+# The unit names no home-relative (~/) path.
 # shellcheck disable=SC2088
 if grep -q '~/' "$UNIT_FILE"; then
   note "cursor-remote@.service has relative paths (contains ~)"
 fi
 
-# Verify the unit has absolute ExecStart path
-if ! grep -q 'ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor --repo %i -- %h/.local/bin/agent' "$UNIT_FILE"; then
-  note "cursor-remote@.service ExecStart must run %h/.local/bin/agent through codvps internal shell-exec"
+# The worker argv (worker --name <hostname>-<repo> --worker-dir . --data-dir
+# ~/.local/share/cursor-agent/codvps-workers/<repo> start) comes from codvps
+# internal remote-start, the start manual mode shares; the unit only names the
+# provider and repository. The received argv is checked below.
+if ! grep -Fxq 'ExecStart=/usr/local/bin/codvps internal remote-start --provider cursor --repo %i' "$UNIT_FILE"; then
+  note "cursor-remote@.service ExecStart must start the worker through codvps internal remote-start"
 fi
 
 if ! grep -Fxq 'WorkingDirectory=%h' "$UNIT_FILE"; then
   note "Cursor must resolve the registered checkout after starting from HOME"
 fi
 
-# Verify worker options come before "start" subcommand
-if ! grep -q 'worker --name %H-' "$UNIT_FILE"; then
-  note "cursor-remote@.service must have: worker --name %H-... (options before start)"
-fi
-
-if ! grep -Fq -- '--worker-dir . --data-dir' "$UNIT_FILE"; then
-  note "cursor-remote@.service must resolve the registered checkout and use --worker-dir ."
-fi
-
-if ! grep -q 'data-dir %h/.local/share/cursor-agent/codvps-workers/%i' "$UNIT_FILE"; then
-  note "cursor-remote@.service must have: --data-dir %h/.local/share/cursor-agent/codvps-workers/%i"
-fi
-
-if ! grep -q 'start$' "$UNIT_FILE"; then
-  note "cursor-remote@.service must end with 'start' subcommand"
+if ! grep -Fxq 'Environment="NO_OPEN_BROWSER=1"' "$UNIT_FILE"; then
+  note "cursor-remote@.service must keep Environment=\"NO_OPEN_BROWSER=1\""
 fi
 
 # Test: login cursor
