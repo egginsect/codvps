@@ -66,7 +66,7 @@ func ghAuthStatus(ctx *Context) ([]ghAccount, error) {
 		// Older gh (Ubuntu 24.04 ships 2.45) has no --json on auth status;
 		// the guided flow upgrades it before this point (ensureGH).
 		if ghcli.Classify(stderr, exitCode, err) == ghcli.TooOld {
-			return nil, fmt.Errorf("this gh is too old for codvps: `gh auth status --json` is unsupported; run sudo codvps install, or install the current gh from %s", ghcli.PackagesURL)
+			return nil, fmt.Errorf("this gh is too old for codvps: `gh auth status --json` is unsupported; run sudo codvps install --system, or install the current gh from %s", ghcli.PackagesURL)
 		}
 		return nil, fmt.Errorf("gh auth status failed: exit %d: %s", exitCode, strings.TrimSpace(stderr))
 	}

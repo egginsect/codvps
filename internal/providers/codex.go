@@ -235,7 +235,7 @@ func codexRestoreHead(h InstallHost, selected, should bool) error {
 		}
 		h.Warnf("Codex Remote remains enabled but stopped; run codvps login %[1]s, then codvps enable %[1]s", codexName)
 	case should:
-		h.Warnf("%s is not a selected component; leaving the previously enabled Codex Remote unit as-is (nothing removed). Reselect it with: sudo codvps install --components claude,%[1]s", codexName)
+		h.Warnf("%s is not a selected component; leaving the previously enabled Codex Remote unit as-is (nothing removed). Reselect it with: sudo codvps install --system --components claude,%[1]s", codexName)
 	}
 	return nil
 }

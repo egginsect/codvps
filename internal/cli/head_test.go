@@ -56,7 +56,7 @@ func TestHeadSetEnabledGating(t *testing.T) {
 			env := testHeadEnv(t, layout, fr, codex)
 
 			err := env.headSetEnabled(provider, true)
-			want := provider + " is not a selected component; rerun with it selected, e.g.: sudo codvps install --components claude,codex,cursor,opencode"
+			want := provider + " is not a selected component; rerun with it selected, e.g.: sudo codvps install --system --components claude,codex,cursor,opencode"
 			if err == nil || err.Error() != want {
 				t.Fatalf("head enable %s = %v, want %q", provider, err, want)
 			}
@@ -80,7 +80,7 @@ func TestLoginCodexRefusedWhenCodexUnselected(t *testing.T) {
 	}
 	fr := runner.NewFakeRunner()
 	err := runLogin(layout, providers.All(), "codex", &login.Context{Runner: fr, HomeDir: layout.Home()})
-	want := "codex is not a selected component; select it first, e.g.: sudo codvps install --components claude,codex,cursor,opencode"
+	want := "codex is not a selected component; select it first, e.g.: sudo codvps install --system --components claude,codex,cursor,opencode"
 	if err == nil || err.Error() != want {
 		t.Fatalf("login codex = %v, want %q", err, want)
 	}

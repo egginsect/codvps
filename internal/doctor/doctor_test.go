@@ -342,7 +342,7 @@ func TestDoctorFailsTheRetiredSandboxedCodexUnit(t *testing.T) {
 	if rep.Failures == 0 {
 		t.Fatal("doctor accepted the retired sandboxed Codex unit")
 	}
-	mustContain(t, out, "FAIL: installed Codex unit is missing or is not the current one; run sudo codvps install")
+	mustContain(t, out, "FAIL: installed Codex unit is missing or is not the current one; run sudo codvps install --system")
 }
 
 // The retired sandboxed unit left the control socket a symlink into its

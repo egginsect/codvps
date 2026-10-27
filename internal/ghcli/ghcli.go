@@ -1,5 +1,5 @@
 // Package ghcli installs and probes the current GitHub CLI. Host
-// provisioning (`sudo codvps install`) and `codvps login github` share it:
+// provisioning (`sudo codvps install --system`) and `codvps login github` share it:
 // provisioning installs gh up front, and login installs or upgrades it on
 // demand when the gh on the host is missing or too old for codvps.
 package ghcli

@@ -40,7 +40,7 @@ test_repo_without_args() {
     return 1
   fi
 
-  expected="usage: codvps repo <add|list|remove>"
+  expected="usage: codvps repo <add|add-local|list|remove>"
   if ! grep -Fx "$expected" <<<"$output" >/dev/null; then
     echo "FAIL: repo output does not match expected usage line"
     echo "Got: $output"

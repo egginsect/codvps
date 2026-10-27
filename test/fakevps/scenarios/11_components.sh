@@ -17,7 +17,7 @@ set -euo pipefail
 #
 # Writes /etc/codvps/components.json as root (via sudo), reads it back as
 # the unprivileged operator, and removes /etc/codvps when done. The
-# selection-validation cases run `sudo codvps install` with an invalid
+# selection-validation cases run `sudo codvps install --system` with an invalid
 # --components/--switch value: install refuses those before its first host
 # mutation, so they never install anything. The valid-value rows of the
 # reference's validator, the registry file mode and the fresh-host
@@ -95,7 +95,7 @@ test_install_rejects_invalid_selection() {
 expect_install_refusal() {
   local out rc
   set +e
-  out=$(sudo "$CODVPS_BIN" install --skip-provision "$1" "$2" </dev/null 2>&1)
+  out=$(sudo "$CODVPS_BIN" install --system --skip-provision "$1" "$2" </dev/null 2>&1)
   rc=$?
   set -e
   if [[ $rc -ne 1 ]]; then

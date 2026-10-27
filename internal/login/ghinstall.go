@@ -12,7 +12,7 @@ import (
 
 // errSudoNeedsTerminal is returned when installing gh needs root, sudo would
 // prompt for a password, and there is no terminal to answer it.
-var errSudoNeedsTerminal = errors.New("gh is missing or too old for codvps, and installing the current gh needs root: sudo would prompt for a password but there is no terminal; run sudo codvps install (installs the current gh)")
+var errSudoNeedsTerminal = errors.New("gh is missing or too old for codvps, and installing the current gh needs root: sudo would prompt for a password but there is no terminal; run sudo codvps install --system (installs the current gh)")
 
 // ensureGH is the first step of the guided flow: make sure the host has a
 // gh that supports `gh auth status --json`, installing or upgrading it on
@@ -34,10 +34,10 @@ func ensureGH(ctx *Context) error {
 		return err
 	}
 	if err := ghcli.Install(&ghInstaller{ctx: ctx, sudo: sudo}); err != nil {
-		return fmt.Errorf("installing the current gh failed: %w (or run sudo codvps install)", err)
+		return fmt.Errorf("installing the current gh failed: %w (or run sudo codvps install --system)", err)
 	}
 	if after := ghState(ctx); after != ghcli.Usable {
-		return errors.New("the current gh was installed but the gh on PATH is still missing or too old; check which gh is first on PATH, or run sudo codvps install")
+		return errors.New("the current gh was installed but the gh on PATH is still missing or too old; check which gh is first on PATH, or run sudo codvps install --system")
 	}
 	ctx.printf("gh is now installed.\n")
 	return nil

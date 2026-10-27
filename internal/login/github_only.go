@@ -35,7 +35,9 @@ func GitHubAuthOnly(ctx *Context, nonInteractive, deferOnly bool) (int, error) {
 			return 2, fmt.Errorf("GitHub authentication is missing or could not be verified; %s", githubAuthOnlyHint)
 		}
 		ctx.printf("GitHub HTTPS authentication required. Open https://github.com/login/device and enter the one-time code gh prints below.\n")
-		code, err := ctx.Runner.RunWithIO("gh", []string{"auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--skip-ssh-key", "--web"}, strings.NewReader(""), ctx.out(), ctx.errOut())
+		// HTTPS avoids SSH-key setup without the newer --skip-ssh-key flag,
+		// which gh 2.46 does not recognize. Do not request SSH-related scopes.
+		code, err := ctx.Runner.RunWithIO("gh", []string{"auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"}, strings.NewReader(""), ctx.out(), ctx.errOut())
 		if code != 0 || err != nil {
 			return 1, fmt.Errorf("GitHub HTTPS login failed; %s", githubAuthOnlyHint)
 		}

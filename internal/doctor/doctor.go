@@ -559,12 +559,12 @@ func orDefault(v, fallback string) string {
 func (d *Check) checkLegacyRuntimes() {
 	for _, path := range systemd.LegacyRuntimePaths(d.opts.Operator) {
 		if _, err := os.Lstat(d.sys(path)); err == nil {
-			d.Warn("pinned runtime leftover %s is present; rerun sudo codvps install to remove it", path)
+			d.Warn("pinned runtime leftover %s is present; rerun sudo codvps install --system to remove it", path)
 		}
 	}
 	// The layout already resolves the release tree under the system root.
 	if tree := d.opts.Layout.RuntimeRootPath(); dirExistsAt(tree) {
-		d.Warn("pinned runtime copies are still in %s; rerun sudo codvps install to remove them", tree)
+		d.Warn("pinned runtime copies are still in %s; rerun sudo codvps install --system to remove them", tree)
 	}
 }
 

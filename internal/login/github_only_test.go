@@ -34,6 +34,11 @@ func (r *authOnlyRunner) next(name string, args []string, stream bool) runner.Re
 	if r.calls >= len(r.steps) {
 		r.t.Fatalf("unexpected extra command: %s %v", name, args)
 	}
+	for _, arg := range args {
+		if arg == "--skip-ssh-key" || arg == "--json" || strings.Contains(arg, "admin:public_key") {
+			r.t.Fatalf("auth-only uses unsupported or SSH-scoped argument: %s", arg)
+		}
+	}
 	step := r.steps[r.calls]
 	r.calls++
 	if name != "gh" || !reflect.DeepEqual(args, step.args) || stream != step.stream {
@@ -80,7 +85,7 @@ func authOnlyHelper() authOnlyStep {
 }
 
 func authOnlyLogin() authOnlyStep {
-	return authOnlyStep{args: []string{"auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--skip-ssh-key", "--web"}, response: runner.Response{Stderr: "one-time code: ABCD-1234\nhttps://github.com/login/device\n"}, stream: true}
+	return authOnlyStep{args: []string{"auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"}, response: runner.Response{Stderr: "one-time code: ABCD-1234\nhttps://github.com/login/device\n"}, stream: true}
 }
 
 func runAuthOnly(t *testing.T, nonInteractive, deferOnly bool, steps []authOnlyStep) (int, string, error) {
@@ -141,7 +146,7 @@ func TestGitHubAuthOnlyUnauthenticatedReadOnly(t *testing.T) {
 	}
 }
 
-func TestGitHubAuthOnlyDeviceLoginUsesHTTPSWithoutSSHScope(t *testing.T) {
+func TestGitHubAuthOnlyDeviceLoginGH246UsesHTTPSWithoutSSHScope(t *testing.T) {
 	code, out, err := runAuthOnly(t, false, false, []authOnlyStep{authOnlyStatus(false), authOnlyLogin(), authOnlyStatus(true), authOnlyAccount(), authOnlyProtocol(), authOnlyHelper()})
 	if code != 0 || err != nil || !strings.Contains(out, "ABCD-1234") || !strings.Contains(out, "ready as octocat") {
 		t.Fatalf("result = %d, %v, %q", code, err, out)

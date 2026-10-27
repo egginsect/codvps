@@ -73,6 +73,7 @@ func helpEntries() []helpEntry {
 	heads := "<" + strings.Join(headProviders(set).Names(), "|") + ">"
 	entries = append(entries,
 		helpEntry{"login github [--auth-only]", "Authenticate GitHub; --auth-only skips VPS SSH and Git identity setup"},
+		helpEntry{"repo add-local <path>", "Register a local GitHub checkout offline without cloning or starting heads"},
 		helpEntry{"repo add <url> [--dest <path>]", "Clone or reattach a repository and attach it to every enabled head"},
 		helpEntry{"run <provider> <repo> [-- args]", "Run a native coding CLI in a registered checkout"},
 		helpEntry{"remote run <claude|cursor> <repo>", "Run a native per-repository remote worker (manual mode)"},
@@ -101,7 +102,8 @@ var helpConfigEntries = []helpEntry{
 var helpEntriesAfterConfig = []helpEntry{
 	{"status", "Show host and per-repository status"},
 	{"doctor", "Check codvps prerequisites and health"},
-	{"install [--components <list>] [--switch <name>] [--skip-provision]", "Install or repair codvps on this host (run with sudo)"},
+	{"install [--user] [--components claude,codex,cursor] [--dry-run]", "Install native user CLIs without sudo or services"},
+	{"install --system [--components <list>] [--switch <name>] [--skip-provision]", "Install or repair codvps on this host (run with sudo)"},
 	{"uninstall [--dry-run]", "Remove what codvps installed; keep repositories, state and credentials (run with sudo)"},
 	{"help", "Show this help"},
 	{"version", "Show version, commit and build date"},
