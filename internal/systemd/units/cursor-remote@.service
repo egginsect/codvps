@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h
-ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor --repo %i -- %h/.local/bin/agent worker --name %H-%i --worker-dir . --data-dir %h/.local/share/cursor-agent/codvps-workers/%i start
+ExecStart=/usr/local/bin/codvps internal remote-start --provider cursor --repo %i
 Restart=always
 RestartSec=5
 Environment="NO_OPEN_BROWSER=1"

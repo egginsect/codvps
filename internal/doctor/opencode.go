@@ -63,7 +63,7 @@ func (d *Check) collectOpenCodeState() (opencodeState, error) {
 	if err == nil {
 		st.serverRunning = true
 
-	st.serverHealthy = d.checkOpenCodeServerHealth()
+		st.serverHealthy = d.checkOpenCodeServerHealth()
 	}
 
 	return st, nil

@@ -30,15 +30,15 @@ func TestEveryShellExecHeadUnitDeclaresEnvironmentPATH(t *testing.T) {
 	n := 0
 	for _, u := range units {
 		c := string(u.Content)
-		if !strings.Contains(c, "internal shell-exec") {
+		if !strings.Contains(c, "internal shell-exec") && !strings.Contains(c, "internal remote-start") {
 			continue
 		}
 		n++
 		if !strings.Contains(c, "\nEnvironment=PATH=") && !strings.Contains(c, "\nEnvironment=\"PATH=") {
-			t.Errorf("%s runs shell-exec without Environment=PATH", u.InstallPath)
+			t.Errorf("%s runs shell-exec or remote-start without Environment=PATH", u.InstallPath)
 		}
 	}
 	if n != 4 {
-		t.Errorf("checked %d shell-exec units, want 4", n)
+		t.Errorf("checked %d shell-exec/remote-start units, want 4", n)
 	}
 }

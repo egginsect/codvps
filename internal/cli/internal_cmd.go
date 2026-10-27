@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/egginsect/codvps/internal/paths"
 	"github.com/egginsect/codvps/internal/repo"
+	"github.com/egginsect/codvps/internal/session"
 	"github.com/egginsect/codvps/internal/settings"
 	"os"
 	"sort"
@@ -19,7 +20,7 @@ import (
 type internalCmd struct{}
 
 // coreInternal are the helpers every host has, in usage order.
-var coreInternal = []string{"operator-state", "session-check", "shell-exec"}
+var coreInternal = []string{"operator-state", "remote-start", "session-check", "shell-exec"}
 
 func (c *internalCmd) Execute(args []string) error {
 	helpers := providerInternals(providers.All())
@@ -39,6 +40,8 @@ func (c *internalCmd) Execute(args []string) error {
 		return internalOperatorState(args[1:])
 	case "shell-exec":
 		return internalShellExec(args[1:], providers.All(), shellenv.Default())
+	case "remote-start":
+		return internalRemoteStart(args[1:], shellenv.Default())
 	case "session-check":
 		// The retired runtime updater's Codex SessionStart hook: a no-op so
 		// a registration install has not removed yet never fails a session.
@@ -121,25 +124,18 @@ parse:
 			remove = append(remove, p.Env.Remove...)
 		}
 	}
+	var overrides []string
 	if provider != "" || repository != "" {
 		layout, err := paths.New("")
 		if err != nil {
 			return err
 		}
-		overrides, err := settings.Environment(layout)
+		overrides, err = settings.Environment(layout)
 		if err != nil {
 			return err
 		}
-		replace := shell.Exec
-		shell.Exec = func(path string, args, env []string) error {
-			var keys []string
-			for _, entry := range overrides {
-				key, _, _ := strings.Cut(entry, "=")
-				keys = append(keys, key)
-			}
-			return replace(path, args, append(shellenv.Remove(env, keys...), overrides...))
-		}
 	}
+	dir := ""
 	if repository != "" {
 		layout, err := paths.New("")
 		if err != nil {
@@ -156,11 +152,71 @@ parse:
 		if err := repo.IsPrimaryGitCheckout(git, checkout); err != nil {
 			return err
 		}
+		dir = checkout
+	}
+	return shellLaunch(shell, remove, overrides, dir, argv)
+}
+
+const remoteStartUsage = "codvps internal remote-start --provider <claude|cursor> --repo NAME"
+
+// internalRemoteStart is the claude-remote@ and cursor-remote@ units'
+// ExecStart: replace this process with session.UnitStart's plan, the same
+// start manual mode uses, launched like shell-exec in the operator's
+// login-shell environment.
+func internalRemoteStart(args []string, shell shellenv.Options) error {
+	var provider, repository string
+	if len(args) != 4 {
+		return invalidUsage(remoteStartUsage)
+	}
+	for i := 0; i < len(args); i += 2 {
+		switch args[i] {
+		case "--provider":
+			provider = args[i+1]
+		case "--repo":
+			repository = args[i+1]
+		default:
+			return invalidUsage(remoteStartUsage)
+		}
+	}
+	if provider == "" || repository == "" {
+		return invalidUsage(remoteStartUsage)
+	}
+	layout, err := paths.New("")
+	if err != nil {
+		return err
+	}
+	git, err := sessionGit(layout)
+	if err != nil {
+		return err
+	}
+	plan, err := session.UnitStart(layout, provider, repository, git)
+	if err != nil {
+		return err
+	}
+	return shellLaunch(shell, plan.RemoveEnv, plan.Env, plan.Dir, append([]string{plan.Binary}, plan.Args...))
+}
+
+// shellLaunch replaces this process with argv in the operator's
+// login-shell environment minus remove, with every overrides entry
+// replacing an inherited value, started in dir when one is given.
+func shellLaunch(shell shellenv.Options, remove, overrides []string, dir string, argv []string) error {
+	if overrides != nil {
+		replace := shell.Exec
+		shell.Exec = func(path string, args, env []string) error {
+			var keys []string
+			for _, entry := range overrides {
+				key, _, _ := strings.Cut(entry, "=")
+				keys = append(keys, key)
+			}
+			return replace(path, args, append(shellenv.Remove(env, keys...), overrides...))
+		}
+	}
+	if dir != "" {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		if err := os.Chdir(checkout); err != nil {
+		if err := os.Chdir(dir); err != nil {
 			return err
 		}
 		// Production exec replaces this process. Restore cwd if launch fails,

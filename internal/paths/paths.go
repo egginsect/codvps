@@ -143,6 +143,12 @@ func (l *Layout) StateDir() string {
 	return filepath.Join(l.xdgState, l.namespace)
 }
 
+// RemoteDir returns StateDir()/remote: manual mode's background remote
+// worker pid files and logs.
+func (l *Layout) RemoteDir() string {
+	return filepath.Join(l.StateDir(), "remote")
+}
+
 // CacheDir returns ~/.cache/codvps or ~/.cache/{CODVPS_NAMESPACE}
 func (l *Layout) CacheDir() string {
 	return filepath.Join(l.xdgCache, l.namespace)

@@ -95,4 +95,3 @@ func (s Set) HeadHosts(h *head.Heads) []head.Named {
 	}
 	return out
 }
-

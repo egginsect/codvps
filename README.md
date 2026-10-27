@@ -283,18 +283,89 @@ distinguish local prerequisite checks from live authentication/remote checks.
 Changing `session_mode` does **not** stop existing services: disable any previously
 enabled heads before switching to avoid duplicate workers.
 
-Run repository-scoped remote workers in separate terminals:
+Claude and Cursor run one remote worker per registered repository. Manual
+mode starts them with the same start as the systemd units, so Claude gets the
+units' flags: `--spawn worktree --capacity 4 --no-create-session-in-dir
+--remote-control-session-name-prefix cloud-<repo>`. Cursor gets
+`worker --name codvps-<repo> ... start` with `NO_OPEN_BROWSER=1`; the systemd
+unit keeps its historical `<hostname>-<repo>` worker name and data directory.
 
 ```bash
-codvps remote run claude REPO
-codvps remote run cursor REPO
+codvps remote run claude REPO          # foreground in this terminal
+codvps remote start claude REPO        # the same as remote run
+codvps remote start claude REPO -d     # background (--background)
+codvps remote start claude             # every registered repository, background
+codvps remote status                   # background workers: pid and log
+codvps remote status claude REPO
+codvps remote stop claude REPO         # one worker
+codvps remote stop claude              # every background claude worker
 ```
 
-These commands hand the terminal and signals to the native CLI. They do not
-create a background supervisor, restart crashed workers or survive a terminal
-closure automatically. Stop foreground workers with Ctrl+C. A normal VPS can
-continue to use the existing systemd `enable`/`disable` commands in the default
-`systemd` mode.
+The same forms work with `cursor`. In the foreground, the native CLI gets the
+terminal and its signals; stop it with Ctrl+C.
+
+- **No repository:** `start` runs one worker per registered repository. Each
+  worker runs in the background, and codvps prints a notice. A worker that is
+  already running is reported and left alone. A repository that fails does not
+  stop the others, and the command fails at the end with every failure named.
+- **Background workers:** `-d` or `--background` detaches the worker into its
+  own session. Its stdin is `/dev/null`, and its output is appended to
+  `~/.local/state/codvps/remote/<provider>-<repo>.log`. Its pid is recorded in
+  `<provider>-<repo>.pid` in the same directory (the directory is 0700 and the
+  files are 0600; the path follows `XDG_STATE_HOME`). codvps refuses to start a
+  second worker for the same provider and repository while the recorded process
+  is alive, and replaces stale pid files. A worker that exits within about a
+  second is reported as a failure, with its log path.
+- **Stopping:** `stop` sends SIGTERM to the worker's process group, waits up to
+  10 seconds, and removes the pid file. Stopping when nothing is running prints
+  a message and exits 0.
+
+Manual mode does not supervise workers. Nothing restarts a worker that exits,
+and nothing starts workers at boot. Restart and boot persistence come only from
+the default `systemd` mode, where a normal VPS keeps using `enable`/`disable`.
+
+#### Supervisor loop for hosts without systemd
+
+On a host without systemd, a small shell loop can restart workers. The script
+below is an example, not a supported supervisor. It reads the repository names
+from `codvps repo list`: after the summary line, a blank line and the
+`REPOSITORY` header, each row starts with a repository name. For each
+repository it keeps `codvps remote run claude "$repo"` running and restarts it
+5 seconds after it exits. It also answers Claude's first-run
+`Enable Remote Control? (y/n)` prompt with `y`, because manual mode does not
+seed that consent and does not trust repositories for you. Run `claude` in
+each checkout once to review the workspace trust dialog. Install the script
+somewhere like `/opt/codvps-supervisor.sh` and run it under `nohup`, `tmux` or
+your init system:
+
+```sh
+#!/bin/sh
+# Example only, not a supported supervisor: keep one foreground Claude
+# Remote worker per registered repository, restarting each when it exits.
+set -u
+
+run_worker() {
+  repo=$1
+  while :; do
+    # Answer the first-run "Enable Remote Control? (y/n)" prompt.
+    yes y | codvps remote run claude "$repo"
+    echo "codvps-supervisor: claude worker for $repo exited ($?); restarting in 5s" >&2
+    sleep 5
+  done
+}
+
+# Stop every worker when the supervisor is stopped.
+trap 'kill 0' INT TERM
+
+# repo list prints a summary, a blank line, a REPOSITORY header, then one
+# row per repository whose first column is its name.
+codvps repo list | awk 'found { print $1 } /^REPOSITORY / { found = 1 }' | {
+  while read -r repo; do
+    run_worker "$repo" &
+  done
+  wait
+}
+```
 
 Codex uses one **host-wide** native daemon and the same `~/.codex` home as its
 codvps login and interactive CLI:
@@ -306,8 +377,11 @@ codvps remote status codex
 codvps remote stop codex
 ```
 
-`start` requires the official standalone Codex package under `~/.codex` so the
-vendor's daemon bootstrap does not copy an unrelated CLI/runtime directory.
+`start` requires the official standalone Codex package under `~/.codex`, so the
+vendor's daemon bootstrap does not copy an unrelated CLI or runtime directory.
+It runs the same bounded-retry helper as the systemd `codex-remote@.service`
+unit (`codvps internal codex-remote-start`), which is unchanged. The daemon
+detaches on its own, so `--background` is accepted and ignored, with a note.
 `stop` affects that Codex home's shared native daemon and may interrupt other
 clients using it. No repository argument is accepted for Codex Remote: select
 the checkout directory in the connected client. A listening socket is only a

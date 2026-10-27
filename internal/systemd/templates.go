@@ -16,8 +16,10 @@ import (
 //
 // Semantics carried over from the reference unit files:
 //   - one claude-remote@<repo>.service instance per registered repository,
-//     running `claude remote-control` from ~/<repo> and never an interactive
-//     session (--no-create-session-in-dir);
+//     running `codvps internal remote-start --provider claude --repo %i`,
+//     which execs session.Start's `claude remote-control` (the same start
+//     manual mode uses) from the registered checkout and never an
+//     interactive session (--no-create-session-in-dir);
 //   - Restart=always with RestartSec=5, so a killed head comes back on its
 //     own;
 //   - every instance lives in claude-remote.slice, one host-wide budget
@@ -185,10 +187,14 @@ func CodexWorkspacesDropIn(operator string) StaleDropIn {
 //
 // Semantics:
 //   - one cursor-remote@<repo>.service instance per registered repository,
-//     running `agent worker start` from ~/<repo>;
+//     running `codvps internal remote-start --provider cursor --repo %i`,
+//     which execs session.UnitStart's `agent worker ... start` (the same
+//     start plan manual mode uses, keeping the unit's worker identity) from
+//     the registered checkout;
 //   - Restart=always with RestartSec=5, so a killed head comes back on its own;
-//   - the agent binary is at ~/.local/bin/agent and found via PATH;
-//   - worker name is %H-%i (hostname-repository) for unique identification per host.
+//   - the agent binary is ~/.local/bin/agent;
+//   - the worker is named <hostname>-<repo> with --worker-dir ., and its data
+//     lives under ~/.local/share/cursor-agent/codvps-workers/<repo>.
 
 // CursorRemoteTemplate is the cursor-remote@.service template unit name.
 const CursorRemoteTemplate = "cursor-remote@.service"

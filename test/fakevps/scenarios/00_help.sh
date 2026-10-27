@@ -25,6 +25,8 @@ test_help_displays_usage() {
   fi
   for form in 'login github [--auth-only]' 'repo add <url> [--dest <path>]' \
     'config get|set|unset <key> [value]' 'run <provider> <repo> [-- args]' \
+    'remote start <claude|cursor> [<repo>] [--background|-d]' \
+    'remote stop <claude|cursor> [<repo>]' 'remote status [<claude|cursor> [<repo>]]' \
     'remote run <claude|cursor> <repo>' 'remote <start|stop|pair|status> codex'; do
     if ! grep -Fq -- "  $form" <<<"$output"; then
       echo "FAIL: help output does not contain '$form'"

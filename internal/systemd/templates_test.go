@@ -69,12 +69,14 @@ func TestClaudeRemoteServiceTemplate_ScrubsCredentialsAndRestartsAlways(t *testi
 }
 
 // Reference scenarios test_remote_control_invocation and
-// test_claude_is_never_launched_interactively: the head runs exactly
+// test_claude_is_never_launched_interactively: the head starts through
+// codvps internal remote-start, whose shared session.Start runs exactly
 // `claude remote-control` in worktree mode with a per-repository session
-// prefix and never opens an interactive session in the checkout.
+// prefix and never opens an interactive session in the checkout (the
+// effective argv is pinned in internal/cli's remote-start tests).
 func TestClaudeRemoteServiceTemplate_RemoteControlExecStartIsNeverInteractive(t *testing.T) {
 	lines := unitLines(t, claudeUnit(t, ClaudeRemoteTemplate).Content)
-	want := "ExecStart=/usr/local/bin/codvps internal shell-exec --provider claude --repo %i -- claude remote-control --spawn worktree --capacity 4 --no-create-session-in-dir --remote-control-session-name-prefix cloud-%i"
+	want := "ExecStart=/usr/local/bin/codvps internal remote-start --provider claude --repo %i"
 	var execStarts []string
 	for _, l := range lines {
 		if strings.HasPrefix(l, "ExecStart") {
@@ -127,8 +129,9 @@ func cursorUnit(t *testing.T, name string) UnitTemplate {
 }
 
 // Cursor head: cursor-remote@<repo>.service template has absolute paths,
-// not home-relative ones, and uses %H (hostname) for uniqueness, not %h (home).
-func TestCursorRemoteServiceTemplate_AbsolutePathsAndHostnameUniqueness(t *testing.T) {
+// not home-relative ones, and starts the worker through the shared
+// codvps internal remote-start.
+func TestCursorRemoteServiceTemplate_AbsolutePathsAndSharedStart(t *testing.T) {
 	u := cursorUnit(t, CursorRemoteTemplate)
 	if u.InstallPath != "/etc/systemd/user/cursor-remote@.service" {
 		t.Fatalf("install path = %q", u.InstallPath)
@@ -136,7 +139,8 @@ func TestCursorRemoteServiceTemplate_AbsolutePathsAndHostnameUniqueness(t *testi
 	lines := unitLines(t, u.Content)
 	for _, want := range []string{
 		"WorkingDirectory=%h",
-		"ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor --repo %i -- %h/.local/bin/agent worker --name %H-%i --worker-dir . --data-dir %h/.local/share/cursor-agent/codvps-workers/%i start",
+		"ExecStart=/usr/local/bin/codvps internal remote-start --provider cursor --repo %i",
+		"Environment=\"NO_OPEN_BROWSER=1\"",
 		"Restart=always",
 		"RestartSec=5",
 		"WantedBy=default.target",
@@ -151,10 +155,6 @@ func TestCursorRemoteServiceTemplate_AbsolutePathsAndHostnameUniqueness(t *testi
 			t.Errorf("cursor-remote@.service has relative home path: %q", l)
 		}
 	}
-	// Verify hostname-based uniqueness
-	if !hasLine(lines, "ExecStart=/usr/local/bin/codvps internal shell-exec --provider cursor --repo %i -- %h/.local/bin/agent worker --name %H-%i --worker-dir . --data-dir %h/.local/share/cursor-agent/codvps-workers/%i start") {
-		t.Errorf("cursor-remote@.service worker name must use %%H (hostname), not %%h (home)")
-	}
 }
 
 func TestCursorUserUnits_CopiesContent(t *testing.T) {
@@ -168,7 +168,9 @@ func TestCursorUserUnits_CopiesContent(t *testing.T) {
 	}
 }
 
-// Every head that runs in the operator's login-shell environment starts
+// Every head runs in the operator's login-shell environment: the
+// per-repository Claude and Cursor heads through `codvps internal
+// remote-start` (session.Start, launched like shell-exec), the others
 // through `codvps internal shell-exec --provider <name> -- <command>`; the
 // unit's own Environment= remains the fallback when the shell is
 // unavailable.
@@ -178,16 +180,15 @@ func TestHeadUnitsStartThroughShellExec(t *testing.T) {
 		provider string
 		command  string
 	}{
-		{claudeUnit(t, ClaudeRemoteTemplate), "claude", "claude remote-control "},
+		{claudeUnit(t, ClaudeRemoteTemplate), "claude", ""},
 		{CodexSystemUnits()[0], "codex", "/usr/local/bin/codvps internal codex-remote-start"},
-		{cursorUnit(t, CursorRemoteTemplate), "cursor", "%h/.local/bin/agent worker "},
+		{cursorUnit(t, CursorRemoteTemplate), "cursor", ""},
 		{OpenCodeUserUnits()[0], "opencode", "%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096"},
 	} {
-		repoOption := ""
-		if tc.provider == "claude" || tc.provider == "cursor" {
-			repoOption = " --repo %i"
+		prefix := "ExecStart=/usr/local/bin/codvps internal shell-exec --provider " + tc.provider + " -- " + tc.command
+		if tc.command == "" {
+			prefix = "ExecStart=/usr/local/bin/codvps internal remote-start --provider " + tc.provider + " --repo %i"
 		}
-		prefix := "ExecStart=/usr/local/bin/codvps internal shell-exec --provider " + tc.provider + repoOption + " -- " + tc.command
 		var execStarts []string
 		for _, l := range unitLines(t, tc.unit.Content) {
 			if strings.HasPrefix(l, "ExecStart") {
